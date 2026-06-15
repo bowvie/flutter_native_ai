@@ -1,3 +1,9 @@
+## 0.1.0
+
+Intial pre-release
+
+- Added an automated publish workflow
+
 ## 0.1.0-alpha.1
 
 Initial alpha release.
