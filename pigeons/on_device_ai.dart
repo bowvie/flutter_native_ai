@@ -9,12 +9,12 @@ import 'package:pigeon/pigeon.dart';
     dartOut: 'lib/src/generated/on_device_ai.g.dart',
     dartOptions: DartOptions(),
     kotlinOut:
-        'android/src/main/kotlin/com/bowvie/flutter_on_device_ai/OnDeviceAi.g.kt',
-    kotlinOptions: KotlinOptions(package: 'com.bowvie.flutter_on_device_ai'),
+        'android/src/main/kotlin/com/bowvie/flutter_native_ai/OnDeviceAi.g.kt',
+    kotlinOptions: KotlinOptions(package: 'com.bowvie.flutter_native_ai'),
     swiftOut:
-        'ios/flutter_on_device_ai/Sources/flutter_on_device_ai/OnDeviceAi.g.swift',
+        'ios/flutter_native_ai/Sources/flutter_native_ai/OnDeviceAi.g.swift',
     swiftOptions: SwiftOptions(),
-    dartPackageName: 'flutter_on_device_ai',
+    dartPackageName: 'flutter_native_ai',
   ),
 )
 /// Availability state returned by the native local AI bridge.

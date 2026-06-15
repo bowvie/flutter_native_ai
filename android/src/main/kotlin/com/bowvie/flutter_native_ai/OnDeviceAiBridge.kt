@@ -1,4 +1,4 @@
-package com.bowvie.flutter_on_device_ai
+package com.bowvie.flutter_native_ai
 
 import android.os.SystemClock
 import com.google.mlkit.genai.common.FeatureStatus

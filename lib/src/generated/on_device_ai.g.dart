@@ -396,7 +396,7 @@ class OnDeviceAiHostApi {
   /// Checks whether the current device and OS can run local AI.
   Future<LocalAiAvailabilityMessage> availability() async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.availability$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.availability$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -416,7 +416,7 @@ class OnDeviceAiHostApi {
   /// Stores system instructions for subsequent generations.
   Future<void> initialize(String instructions) async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.initialize$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.initialize$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -440,7 +440,7 @@ class OnDeviceAiHostApi {
     LocalAiGenerationConfigMessage config,
   ) async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.generateText$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.generateText$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -465,7 +465,7 @@ class OnDeviceAiHostApi {
     LocalAiGenerationConfigMessage config,
   ) async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.startStreamingText$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.startStreamingText$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -486,7 +486,7 @@ class OnDeviceAiHostApi {
   /// Cancels the active streaming response.
   Future<void> cancelStreamingText() async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.cancelStreamingText$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.cancelStreamingText$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -509,7 +509,7 @@ Stream<LocalAiStreamChunkMessage> generationStream({String instanceName = ''}) {
     instanceName = '.$instanceName';
   }
   final EventChannel generationStreamChannel = EventChannel(
-    'dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiStreamApi.generationStream$instanceName',
+    'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiStreamApi.generationStream$instanceName',
     pigeonMethodCodec,
   );
   return generationStreamChannel.receiveBroadcastStream().map((dynamic event) {

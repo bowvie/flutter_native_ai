@@ -1,4 +1,4 @@
-# flutter_on_device_ai
+# flutter_native_ai
 
 A Flutter plugin for private, on-device text generation using native platform AI
 models. It gives Flutter apps one small Dart API over Apple Foundation Models on
@@ -29,13 +29,13 @@ private collection insights without sending collection data to a backend model.
 
 ```yaml
 dependencies:
-  flutter_on_device_ai: ^0.1.0-alpha.1
+  flutter_native_ai: ^0.1.0-alpha.1
 ```
 
 ## Usage
 
 ```dart
-import 'package:flutter_on_device_ai/flutter_on_device_ai.dart';
+import 'package:flutter_native_ai/flutter_native_ai.dart';
 
 final ai = OnDeviceAi();
 

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_on_device_ai/flutter_on_device_ai.dart';
+import 'package:flutter_native_ai/flutter_native_ai.dart';
 
 void main() {
   runApp(const ExampleApp());

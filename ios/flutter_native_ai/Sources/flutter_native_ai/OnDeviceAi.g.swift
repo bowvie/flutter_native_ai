@@ -461,7 +461,7 @@ class OnDeviceAiHostApiSetup {
   static func setUp(binaryMessenger: FlutterBinaryMessenger, api: OnDeviceAiHostApi?, messageChannelSuffix: String = "") {
     let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
     /// Checks whether the current device and OS can run local AI.
-    let availabilityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.availability\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let availabilityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.availability\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       availabilityChannel.setMessageHandler { _, reply in
         api.availability { result in
@@ -477,7 +477,7 @@ class OnDeviceAiHostApiSetup {
       availabilityChannel.setMessageHandler(nil)
     }
     /// Stores system instructions for subsequent generations.
-    let initializeChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.initialize\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let initializeChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.initialize\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       initializeChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -495,7 +495,7 @@ class OnDeviceAiHostApiSetup {
       initializeChannel.setMessageHandler(nil)
     }
     /// Generates a complete response for [prompt].
-    let generateTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.generateText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let generateTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.generateText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       generateTextChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -514,7 +514,7 @@ class OnDeviceAiHostApiSetup {
       generateTextChannel.setMessageHandler(nil)
     }
     /// Starts an asynchronous streaming response for [prompt].
-    let startStreamingTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.startStreamingText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let startStreamingTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.startStreamingText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       startStreamingTextChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
@@ -533,7 +533,7 @@ class OnDeviceAiHostApiSetup {
       startStreamingTextChannel.setMessageHandler(nil)
     }
     /// Cancels the active streaming response.
-    let cancelStreamingTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiHostApi.cancelStreamingText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let cancelStreamingTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.cancelStreamingText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       cancelStreamingTextChannel.setMessageHandler { _, reply in
         api.cancelStreamingText { result in
@@ -605,7 +605,7 @@ class GenerationStreamStreamHandler: PigeonEventChannelWrapper<LocalAiStreamChun
   static func register(with messenger: FlutterBinaryMessenger,
                       instanceName: String = "",
                       streamHandler: GenerationStreamStreamHandler) {
-    var channelName = "dev.flutter.pigeon.flutter_on_device_ai.OnDeviceAiStreamApi.generationStream"
+    var channelName = "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiStreamApi.generationStream"
     if !instanceName.isEmpty {
       channelName += ".\(instanceName)"
     }

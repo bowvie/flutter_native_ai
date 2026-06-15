@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_on_device_ai/src/generated/on_device_ai.g.dart'
+import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
     as generated;
-import 'package:flutter_on_device_ai/flutter_on_device_ai.dart';
+import 'package:flutter_native_ai/flutter_native_ai.dart';
 
 void main() {
   group('OnDeviceAi', () {

@@ -5,7 +5,7 @@ import XCTest
 // If your plugin has been explicitly set to "type: .dynamic" in the Package.swift,
 // you will need to add your plugin as a dependency of RunnerTests within Xcode.
 
-@testable import flutter_on_device_ai
+@testable import flutter_native_ai
 
 // This demonstrates a simple unit test of the Swift portion of this plugin's implementation.
 //
@@ -14,7 +14,7 @@ import XCTest
 class RunnerTests: XCTestCase {
 
   func testGetPlatformVersion() {
-    let plugin = FlutterOnDeviceAiPlugin()
+    let plugin = FlutterNativeAiPlugin()
 
     let call = FlutterMethodCall(methodName: "getPlatformVersion", arguments: [])
 

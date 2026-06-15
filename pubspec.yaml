@@ -1,9 +1,9 @@
-name: flutter_on_device_ai
-description: A Flutter plugin for on-device text generation with native platform AI models.
+name: flutter_native_ai
+description: A Flutter plugin for native on-device generative AI through Apple Foundation Models and Android Gemini Nano.
 version: 0.1.0-alpha.1
-homepage: https://github.com/bowvie/flutter-on-device-ai
-repository: https://github.com/bowvie/flutter-on-device-ai
-issue_tracker: https://github.com/bowvie/flutter-on-device-ai/issues
+homepage: https://github.com/bowvie/flutter_native_ai
+repository: https://github.com/bowvie/flutter_native_ai
+issue_tracker: https://github.com/bowvie/flutter_native_ai/issues
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
@@ -24,7 +24,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.bowvie.flutter_on_device_ai
-        pluginClass: FlutterOnDeviceAiPlugin
+        package: com.bowvie.flutter_native_ai
+        pluginClass: FlutterNativeAiPlugin
       ios:
-        pluginClass: FlutterOnDeviceAiPlugin
+        pluginClass: FlutterNativeAiPlugin

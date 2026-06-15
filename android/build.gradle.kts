@@ -1,4 +1,4 @@
-group = "com.bowvie.flutter_on_device_ai"
+group = "com.bowvie.flutter_native_ai"
 version = "1.0-SNAPSHOT"
 
 buildscript {
@@ -26,7 +26,7 @@ plugins {
 }
 
 android {
-    namespace = "com.bowvie.flutter_on_device_ai"
+    namespace = "com.bowvie.flutter_native_ai"
 
     compileSdk = 36
 

@@ -1,9 +1,9 @@
-package com.bowvie.flutter_on_device_ai
+package com.bowvie.flutter_native_ai
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 
-/** FlutterOnDeviceAiPlugin */
-class FlutterOnDeviceAiPlugin : FlutterPlugin {
+/** FlutterNativeAiPlugin */
+class FlutterNativeAiPlugin : FlutterPlugin {
     private var bridge: OnDeviceAiBridge? = null
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {

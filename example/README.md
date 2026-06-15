@@ -1,6 +1,6 @@
-# flutter_on_device_ai_example
+# flutter_native_ai_example
 
-Example app for `flutter_on_device_ai`.
+Example app for `flutter_native_ai`.
 
 The app checks native model availability on launch, lets you edit a prompt, and
 streams generated text into the UI when the current device supports on-device AI.

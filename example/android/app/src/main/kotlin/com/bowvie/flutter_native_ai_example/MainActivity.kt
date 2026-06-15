@@ -1,4 +1,4 @@
-package com.bowvie.flutter_on_device_ai_example
+package com.bowvie.flutter_native_ai_example
 
 import io.flutter.embedding.android.FlutterActivity
 

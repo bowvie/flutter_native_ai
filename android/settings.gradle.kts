@@ -1,1 +1,1 @@
-rootProject.name = "flutter_on_device_ai"
+rootProject.name = "flutter_native_ai"

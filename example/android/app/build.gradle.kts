@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.bowvie.flutter_on_device_ai_example"
+    namespace = "com.bowvie.flutter_native_ai_example"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,7 +15,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.bowvie.flutter_on_device_ai_example"
+        applicationId = "com.bowvie.flutter_native_ai_example"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

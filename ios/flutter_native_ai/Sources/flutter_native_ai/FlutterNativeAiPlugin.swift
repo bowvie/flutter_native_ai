@@ -1,10 +1,10 @@
 import Flutter
 
-public class FlutterOnDeviceAiPlugin: NSObject, FlutterPlugin {
+public class FlutterNativeAiPlugin: NSObject, FlutterPlugin {
   private let bridge = OnDeviceAiBridge()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
-    let instance = FlutterOnDeviceAiPlugin()
+    let instance = FlutterNativeAiPlugin()
     OnDeviceAiHostApiSetup.setUp(
       binaryMessenger: registrar.messenger(),
       api: instance.bridge
