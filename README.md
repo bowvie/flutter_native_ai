@@ -29,7 +29,7 @@ private collection insights without sending collection data to a backend model.
 
 ```yaml
 dependencies:
-  flutter_native_ai: ^0.1.0-alpha.1
+  flutter_native_ai: ^0.1.1
 ```
 
 ## Usage

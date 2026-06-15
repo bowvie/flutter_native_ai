@@ -9,7 +9,7 @@ let package = Package(
         .iOS("13.0")
     ],
     products: [
-        .library(name: "flutter_native_ai", targets: ["flutter_native_ai"])
+        .library(name: "flutter-native-ai", targets: ["flutter_native_ai"])
     ],
     dependencies: [
         .package(name: "FlutterFramework", path: "../FlutterFramework")
