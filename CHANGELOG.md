@@ -1,6 +1,13 @@
+## 0.1.1
+
+iOS hotfix release.
+
+- Fixes the Swift Package Manager library product name to match Flutter's
+    generated hyphenated plugin product reference.
+
 ## 0.1.0
 
-Intial pre-release
+Initial pre-release
 
 - Added an automated publish workflow
 
