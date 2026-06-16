@@ -1,4 +1,4 @@
-## Unreleased
+## 0.3.0
 
 - Replaces service-level initialization and generation with explicit
     `OnDeviceAiSession` creation.
