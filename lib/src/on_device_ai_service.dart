@@ -85,23 +85,28 @@ abstract class OnDeviceAiApi {
   /// Checks whether local AI is available on the current host.
   Future<generated.LocalAiAvailabilityMessage> availability();
 
-  /// Initializes the host session with system instructions.
-  Future<void> initialize(String instructions);
+  /// Creates a native model session.
+  Future<String> createSession(String instructions);
 
-  /// Generates a complete response for [prompt].
+  /// Releases native resources held by [session].
+  Future<void> disposeSession(String session);
+
+  /// Generates a complete response for [prompt] inside [session].
   Future<generated.LocalAiGenerationResponseMessage> generateText(
+    String session,
     String prompt,
     generated.LocalAiGenerationConfigMessage config,
   );
 
-  /// Starts a streaming generation request for [prompt].
+  /// Starts a streaming generation request for [prompt] inside [session].
   Future<void> startStreamingText(
+    String session,
     String prompt,
     generated.LocalAiGenerationConfigMessage config,
   );
 
-  /// Cancels the active streaming request, if any.
-  Future<void> cancelStreamingText();
+  /// Cancels the active streaming request for [session], if any.
+  Future<void> cancelStreamingText(String session);
 
   /// Emits text snapshots for the active streaming request.
   Stream<generated.LocalAiStreamChunkMessage> generationStream();
@@ -119,34 +124,41 @@ class OnDeviceAiHostApiAdapter implements OnDeviceAiApi {
       _hostApi.availability();
 
   @override
-  Future<void> initialize(String instructions) =>
-      _hostApi.initialize(instructions);
+  Future<String> createSession(String instructions) =>
+      _hostApi.createSession(instructions);
+
+  @override
+  Future<void> disposeSession(String session) =>
+      _hostApi.disposeSession(session);
 
   @override
   Future<generated.LocalAiGenerationResponseMessage> generateText(
+    String session,
     String prompt,
     generated.LocalAiGenerationConfigMessage config,
-  ) => _hostApi.generateText(prompt, config);
+  ) => _hostApi.generateText(session, prompt, config);
 
   @override
   Future<void> startStreamingText(
+    String session,
     String prompt,
     generated.LocalAiGenerationConfigMessage config,
-  ) => _hostApi.startStreamingText(prompt, config);
+  ) => _hostApi.startStreamingText(session, prompt, config);
 
   @override
-  Future<void> cancelStreamingText() => _hostApi.cancelStreamingText();
+  Future<void> cancelStreamingText(String session) =>
+      _hostApi.cancelStreamingText(session);
 
   @override
   Stream<generated.LocalAiStreamChunkMessage> generationStream() =>
       generated.generationStream();
 }
 
-/// App-facing service for local AI availability and text generation.
+/// Entry point for checking local AI availability and creating sessions.
 ///
-/// This class keeps generated Pigeon types out of UI code, maps host failures
-/// into stable app models, and owns the extra stream cancellation needed when
-/// the host sends a final `isDone` chunk.
+/// Generation always runs through an [OnDeviceAiSession]. Reusing the same
+/// session is the cross-platform way to preserve native session context when a
+/// platform supports it, such as Apple Foundation Models.
 class OnDeviceAi {
   OnDeviceAi({OnDeviceAiApi? api}) : _api = api ?? OnDeviceAiHostApiAdapter();
 
@@ -172,20 +184,42 @@ class OnDeviceAi {
     }
   }
 
-  /// Initializes the local AI session with optional system instructions.
-  Future<void> initialize({String? instructions}) {
-    return _api.initialize(
-      instructions ??
-          'You are an on-device assistant. Keep answers short and practical.',
-    );
+  /// Creates a reusable native model session.
+  ///
+  /// Pass [instructions] to set the session's system behavior. Keep and reuse
+  /// the returned [OnDeviceAiSession] for related prompts so platforms with
+  /// stateful model sessions can retain context between calls.
+  Future<OnDeviceAiSession> createSession({String? instructions}) async {
+    final session = await _api.createSession(instructions ?? '');
+    return OnDeviceAiSession._(api: _api, session: session);
   }
+}
 
-  /// Generates one complete local AI response.
+/// A reusable native local AI model session.
+///
+/// Sessions own platform model state. Dispose a session when the surrounding UI
+/// flow is finished so native resources and any retained context can be freed.
+class OnDeviceAiSession {
+  OnDeviceAiSession._({required OnDeviceAiApi api, required String session})
+    : _api = api,
+      _session = session;
+
+  final OnDeviceAiApi _api;
+  final String _session;
+
+  /// Whether [dispose] has been called.
+  bool get isDisposed => _isDisposed;
+
+  bool _isDisposed = false;
+
+  /// Generates one complete local AI response in this session.
   Future<OnDeviceAiGenerationResult> generateText({
     required String prompt,
     OnDeviceAiGenerationConfig config = const OnDeviceAiGenerationConfig(),
   }) async {
+    _ensureActive();
     final response = await _api.generateText(
+      _session,
       prompt,
       generated.LocalAiGenerationConfigMessage(
         maxTokens: config.maxTokens,
@@ -200,15 +234,17 @@ class OnDeviceAi {
     );
   }
 
-  /// Streams local AI response snapshots until the host sends a done chunk.
+  /// Streams local AI response snapshots in this session.
   ///
-  /// The host currently emits cumulative text snapshots. When an `isDone` chunk
-  /// arrives, the subscription is cancelled immediately so late host chunks do
-  /// not reach already completed UI state.
+  /// Stream chunks are cumulative snapshots. If the model emits `Hello` and then
+  /// `Hello world`, this stream emits both snapshots. Cancelling the Dart stream
+  /// also asks the native bridge to cancel the active generation. Only one
+  /// streaming generation should be active at a time for a plugin instance.
   Stream<OnDeviceAiStreamChunk> generateTextStream({
     required String prompt,
     OnDeviceAiGenerationConfig config = const OnDeviceAiGenerationConfig(),
   }) {
+    _ensureActive();
     late final StreamSubscription<generated.LocalAiStreamChunkMessage>
     subscription;
     final controller = StreamController<OnDeviceAiStreamChunk>();
@@ -261,7 +297,9 @@ class OnDeviceAi {
       );
 
       unawaited(
-        _api.startStreamingText(prompt, generatedConfig).catchError((error) {
+        _api.startStreamingText(_session, prompt, generatedConfig).catchError((
+          Object error,
+        ) {
           if (isClosing) {
             return null;
           }
@@ -276,12 +314,31 @@ class OnDeviceAi {
     // ignore: cascade_invocations
     controller.onCancel = () async {
       await subscription.cancel();
-      await _api.cancelStreamingText();
+      await _api.cancelStreamingText(_session);
     };
 
     return controller.stream;
   }
 
-  /// Cancels the active streaming request, if any.
-  Future<void> cancelStreamingText() => _api.cancelStreamingText();
+  /// Cancels the active streaming request in this session, if any.
+  Future<void> cancelStreamingText() {
+    _ensureActive();
+    return _api.cancelStreamingText(_session);
+  }
+
+  /// Releases this session's native resources and retained model context.
+  Future<void> dispose() async {
+    if (_isDisposed) {
+      return;
+    }
+
+    _isDisposed = true;
+    await _api.disposeSession(_session);
+  }
+
+  void _ensureActive() {
+    if (_isDisposed) {
+      throw StateError('This OnDeviceAiSession has been disposed.');
+    }
+  }
 }

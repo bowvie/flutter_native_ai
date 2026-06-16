@@ -15,6 +15,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 private const val LOCAL_AI_UNAVAILABLE = "local-ai-unavailable"
 private const val LOCAL_AI_GENERATION_FAILED = "local-ai-generation-failed"
@@ -32,8 +33,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val generationClient = Generation.getClient()
     private val streamHandler = LocalAiGenerationStreamHandler()
-    @Volatile
-    private var instructions = ""
+    private val sessions = mutableMapOf<String, LocalAiSession>()
 
     fun registerStreamHandler(messenger: BinaryMessenger) {
         GenerationStreamStreamHandler.register(messenger, streamHandler)
@@ -48,7 +48,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         }
     }
 
-    override fun initialize(instructions: String, callback: (Result<Unit>) -> Unit) {
+    override fun createSession(instructions: String, callback: (Result<String>) -> Unit) {
         scope.launch {
             val availability = withContext(Dispatchers.Default) {
                 currentAvailability()
@@ -58,18 +58,32 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                 return@launch
             }
 
-            this@OnDeviceAiBridge.instructions = instructions
-            callback(Result.success(Unit))
+            val session = UUID.randomUUID().toString()
+            sessions[session] = LocalAiSession(instructions = instructions)
+            callback(Result.success(session))
         }
     }
 
+    override fun disposeSession(session: String, callback: (Result<Unit>) -> Unit) {
+        streamHandler.cancel(session)
+        sessions.remove(session)
+        callback(Result.success(Unit))
+    }
+
     override fun generateText(
+        session: String,
         prompt: String,
         config: LocalAiGenerationConfigMessage,
         callback: (Result<LocalAiGenerationResponseMessage>) -> Unit,
     ) {
         scope.launch {
             try {
+                val localSession = sessions[session]
+                if (localSession == null) {
+                    callback(Result.failure(sessionNotFoundError()))
+                    return@launch
+                }
+
                 val result = withContext(Dispatchers.Default) {
                     val availability = currentAvailability()
                     if (!availability.isAvailable) {
@@ -78,7 +92,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
 
                     val startTime = SystemClock.elapsedRealtimeNanos()
                     val response = generationClient.generateContent(
-                        buildRequest(prompt, config, instructions),
+                        buildRequest(prompt, config, localSession),
                     )
                     val text = response.candidates.firstOrNull()?.text
                     if (text.isNullOrBlank()) {
@@ -89,6 +103,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                         )
                     }
 
+                    localSession.record(prompt, text)
                     Result.success(
                         LocalAiGenerationResponseMessage(
                             text = text,
@@ -117,6 +132,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
     }
 
     override fun startStreamingText(
+        session: String,
         prompt: String,
         config: LocalAiGenerationConfigMessage,
         callback: (Result<Unit>) -> Unit,
@@ -130,17 +146,24 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                 return@launch
             }
 
+            val localSession = sessions[session]
+            if (localSession == null) {
+                callback(Result.failure(sessionNotFoundError()))
+                return@launch
+            }
+
             streamHandler.start(
+                session = session,
                 prompt = prompt,
-                instructions = instructions,
+                localSession = localSession,
                 config = config,
             )
             callback(Result.success(Unit))
         }
     }
 
-    override fun cancelStreamingText(callback: (Result<Unit>) -> Unit) {
-        streamHandler.cancel()
+    override fun cancelStreamingText(session: String, callback: (Result<Unit>) -> Unit) {
+        streamHandler.cancel(session)
         callback(Result.success(Unit))
     }
 
@@ -197,38 +220,81 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         )
     }
 
+    private fun sessionNotFoundError(): FlutterError {
+        return FlutterError(
+            "local-ai-session-not-found",
+            "The local AI session has already been disposed or was not created.",
+            null,
+        )
+    }
+
     private fun elapsedMillisSince(startTimeNanos: Long): Double {
         return (SystemClock.elapsedRealtimeNanos() - startTimeNanos) / 1_000_000.0
     }
 }
 
+private class LocalAiSession(
+    private val instructions: String,
+) {
+    private val messages = mutableListOf<LocalAiMessage>()
+
+    @Synchronized
+    fun composePrompt(prompt: String): String {
+        val builder = StringBuilder()
+        if (instructions.isNotBlank()) {
+            builder.appendLine("Instructions:")
+            builder.appendLine(instructions)
+            builder.appendLine()
+        }
+        if (messages.isNotEmpty()) {
+            builder.appendLine("Previous conversation:")
+            messages.forEach { message ->
+                builder.appendLine("${message.role}: ${message.text}")
+            }
+            builder.appendLine()
+        }
+        builder.appendLine("User request:")
+        builder.append(prompt)
+        return builder.toString()
+    }
+
+    @Synchronized
+    fun record(prompt: String, response: String) {
+        messages.add(LocalAiMessage("User", prompt))
+        messages.add(LocalAiMessage("Assistant", response))
+    }
+}
+
+private data class LocalAiMessage(val role: String, val text: String)
+
 private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val generationClient = Generation.getClient()
     private var sink: PigeonEventSink<LocalAiStreamChunkMessage>? = null
-    private var currentJob: Job? = null
+    private val currentJobs = mutableMapOf<String, Job>()
 
     override fun onListen(p0: Any?, sink: PigeonEventSink<LocalAiStreamChunkMessage>) {
         this.sink = sink
     }
 
     override fun onCancel(p0: Any?) {
-        cancel()
+        cancelAll()
         sink = null
     }
 
     fun start(
+        session: String,
         prompt: String,
-        instructions: String,
+        localSession: LocalAiSession,
         config: LocalAiGenerationConfigMessage,
     ) {
-        cancel()
+        cancel(session)
 
-        currentJob = scope.launch {
+        currentJobs[session] = scope.launch {
             val latestText = StringBuilder()
             try {
                 generationClient.generateContentStream(
-                    buildRequest(prompt, config, instructions),
+                    buildRequest(prompt, config, localSession),
                 ).collect { chunk ->
                     latestText.append(chunk.candidates.firstOrNull()?.text.orEmpty())
                     emit(
@@ -245,6 +311,7 @@ private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
                         isDone = true,
                     ),
                 )
+                localSession.record(prompt, latestText.toString())
             } catch (error: CancellationException) {
                 // Dart owns stream cancellation and closes the UI stream itself.
             } catch (error: Throwable) {
@@ -257,20 +324,24 @@ private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
                     ),
                 )
             } finally {
-                if (currentJob == coroutineContext[Job]) {
-                    currentJob = null
+                if (currentJobs[session] == coroutineContext[Job]) {
+                    currentJobs.remove(session)
                 }
             }
         }
     }
 
-    fun cancel() {
-        currentJob?.cancel()
-        currentJob = null
+    fun cancel(session: String) {
+        currentJobs.remove(session)?.cancel()
+    }
+
+    fun cancelAll() {
+        currentJobs.values.forEach { it.cancel() }
+        currentJobs.clear()
     }
 
     fun close() {
-        cancel()
+        cancelAll()
         scope.cancel()
         sink = null
     }
@@ -285,8 +356,8 @@ private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
 private fun buildRequest(
     prompt: String,
     config: LocalAiGenerationConfigMessage,
-    instructions: String,
-) = generateContentRequest(TextPart(composePrompt(prompt, instructions))) {
+    session: LocalAiSession,
+) = generateContentRequest(TextPart(session.composePrompt(prompt))) {
     config.temperature?.let { temperature = it.toFloat() }
     maxOutputTokens = clampMaxOutputTokens(config.maxTokens)
 }
@@ -294,18 +365,4 @@ private fun buildRequest(
 private fun clampMaxOutputTokens(maxTokens: Long?): Int {
     val requestedTokens = maxTokens ?: DEFAULT_MAX_OUTPUT_TOKENS.toLong()
     return requestedTokens.coerceIn(1L, ML_KIT_MAX_OUTPUT_TOKENS.toLong()).toInt()
-}
-
-private fun composePrompt(prompt: String, instructions: String): String {
-    if (instructions.isBlank()) {
-        return prompt
-    }
-
-    return """
-        Instructions:
-        $instructions
-
-        User request:
-        $prompt
-    """.trimIndent()
 }

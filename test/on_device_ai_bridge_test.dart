@@ -91,14 +91,50 @@ void main() {
       expect(calls.single.message, isNull);
     });
 
+    test('creates and disposes native sessions over the bridge', () async {
+      _setHostHandler(messenger, 'createSession', suffix, calls, (
+        message,
+      ) async {
+        final args = message! as List<Object?>;
+
+        expect(args.single, 'Keep answers short.');
+
+        return <Object?>['session-1'];
+      });
+      _setHostHandler(messenger, 'disposeSession', suffix, calls, (
+        message,
+      ) async {
+        final args = message! as List<Object?>;
+
+        expect(args.single, 'session-1');
+
+        return <Object?>[null];
+      });
+      final hostApi = generated.OnDeviceAiHostApi(
+        binaryMessenger: messenger,
+        messageChannelSuffix: suffix,
+      );
+      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
+
+      final session = await adapter.createSession('Keep answers short.');
+      await adapter.disposeSession(session);
+
+      expect(session, 'session-1');
+      expect(calls.map((call) => call.channelName), [
+        _hostChannel('createSession', suffix),
+        _hostChannel('disposeSession', suffix),
+      ]);
+    });
+
     test('sends prompt and generation config over the bridge', () async {
       _setHostHandler(messenger, 'generateText', suffix, calls, (
         message,
       ) async {
         final args = message! as List<Object?>;
-        final config = args[1]! as generated.LocalAiGenerationConfigMessage;
+        final config = args[2]! as generated.LocalAiGenerationConfigMessage;
 
-        expect(args[0], 'Summarize privately.');
+        expect(args[0], 'session-1');
+        expect(args[1], 'Summarize privately.');
         expect(config.maxTokens, 96);
         expect(config.temperature, 0.25);
 
@@ -117,6 +153,7 @@ void main() {
       final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
       final response = await adapter.generateText(
+        'session-1',
         'Summarize privately.',
         generated.LocalAiGenerationConfigMessage(
           maxTokens: 96,
@@ -145,6 +182,7 @@ void main() {
 
       await expectLater(
         adapter.generateText(
+          'session-1',
           'Hello',
           generated.LocalAiGenerationConfigMessage(),
         ),
@@ -232,7 +270,8 @@ void main() {
 
 const _hostMethods = <String>[
   'availability',
-  'initialize',
+  'createSession',
+  'disposeSession',
   'generateText',
   'startStreamingText',
   'cancelStreamingText',

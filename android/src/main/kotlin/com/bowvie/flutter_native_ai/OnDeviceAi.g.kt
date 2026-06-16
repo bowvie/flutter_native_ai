@@ -459,14 +459,16 @@ val OnDeviceAiPigeonMethodCodec = StandardMethodCodec(OnDeviceAiPigeonCodec())
 interface OnDeviceAiHostApi {
   /** Checks whether the current device and OS can run local AI. */
   fun availability(callback: (Result<LocalAiAvailabilityMessage>) -> Unit)
-  /** Stores system instructions for subsequent generations. */
-  fun initialize(instructions: String, callback: (Result<Unit>) -> Unit)
-  /** Generates a complete response for [prompt]. */
-  fun generateText(prompt: String, config: LocalAiGenerationConfigMessage, callback: (Result<LocalAiGenerationResponseMessage>) -> Unit)
-  /** Starts an asynchronous streaming response for [prompt]. */
-  fun startStreamingText(prompt: String, config: LocalAiGenerationConfigMessage, callback: (Result<Unit>) -> Unit)
-  /** Cancels the active streaming response. */
-  fun cancelStreamingText(callback: (Result<Unit>) -> Unit)
+  /** Creates a native model session. */
+  fun createSession(instructions: String, callback: (Result<String>) -> Unit)
+  /** Releases the native resources associated with [session]. */
+  fun disposeSession(session: String, callback: (Result<Unit>) -> Unit)
+  /** Generates a complete response for [prompt] in [session]. */
+  fun generateText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, callback: (Result<LocalAiGenerationResponseMessage>) -> Unit)
+  /** Starts an asynchronous streaming response for [prompt] in [session]. */
+  fun startStreamingText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, callback: (Result<Unit>) -> Unit)
+  /** Cancels the active streaming response for [session]. */
+  fun cancelStreamingText(session: String, callback: (Result<Unit>) -> Unit)
 
   companion object {
     /** The codec used by OnDeviceAiHostApi. */
@@ -496,12 +498,32 @@ interface OnDeviceAiHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.initialize$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.createSession$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val instructionsArg = args[0] as String
-            api.initialize(instructionsArg) { result: Result<Unit> ->
+            api.createSession(instructionsArg) { result: Result<String> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(OnDeviceAiPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.disposeSession$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val sessionArg = args[0] as String
+            api.disposeSession(sessionArg) { result: Result<Unit> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
@@ -519,9 +541,10 @@ interface OnDeviceAiHostApi {
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
-            val promptArg = args[0] as String
-            val configArg = args[1] as LocalAiGenerationConfigMessage
-            api.generateText(promptArg, configArg) { result: Result<LocalAiGenerationResponseMessage> ->
+            val sessionArg = args[0] as String
+            val promptArg = args[1] as String
+            val configArg = args[2] as LocalAiGenerationConfigMessage
+            api.generateText(sessionArg, promptArg, configArg) { result: Result<LocalAiGenerationResponseMessage> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
@@ -540,9 +563,10 @@ interface OnDeviceAiHostApi {
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
-            val promptArg = args[0] as String
-            val configArg = args[1] as LocalAiGenerationConfigMessage
-            api.startStreamingText(promptArg, configArg) { result: Result<Unit> ->
+            val sessionArg = args[0] as String
+            val promptArg = args[1] as String
+            val configArg = args[2] as LocalAiGenerationConfigMessage
+            api.startStreamingText(sessionArg, promptArg, configArg) { result: Result<Unit> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
@@ -558,8 +582,10 @@ interface OnDeviceAiHostApi {
       run {
         val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.cancelStreamingText$separatedMessageChannelSuffix", codec)
         if (api != null) {
-          channel.setMessageHandler { _, reply ->
-            api.cancelStreamingText{ result: Result<Unit> ->
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val sessionArg = args[0] as String
+            api.cancelStreamingText(sessionArg) { result: Result<Unit> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
@@ -593,9 +619,9 @@ private class OnDeviceAiPigeonStreamHandler<T>(
 }
 
 interface OnDeviceAiPigeonEventChannelWrapper<T> {
-  open fun onListen(p0: Any?, sink: PigeonEventSink<T>) {}
+  fun onListen(p0: Any?, sink: PigeonEventSink<T>) {}
 
-  open fun onCancel(p0: Any?) {}
+  fun onCancel(p0: Any?) {}
 }
 
 class PigeonEventSink<T>(private val sink: EventChannel.EventSink) {

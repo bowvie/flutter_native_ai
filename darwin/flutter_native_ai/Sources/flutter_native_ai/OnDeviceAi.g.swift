@@ -444,14 +444,16 @@ var onDeviceAiPigeonMethodCodec = FlutterStandardMethodCodec(readerWriter: OnDev
 protocol OnDeviceAiHostApi {
   /// Checks whether the current device and OS can run local AI.
   func availability(completion: @escaping (Result<LocalAiAvailabilityMessage, Error>) -> Void)
-  /// Stores system instructions for subsequent generations.
-  func initialize(instructions: String, completion: @escaping (Result<Void, Error>) -> Void)
-  /// Generates a complete response for [prompt].
-  func generateText(prompt: String, config: LocalAiGenerationConfigMessage, completion: @escaping (Result<LocalAiGenerationResponseMessage, Error>) -> Void)
-  /// Starts an asynchronous streaming response for [prompt].
-  func startStreamingText(prompt: String, config: LocalAiGenerationConfigMessage, completion: @escaping (Result<Void, Error>) -> Void)
-  /// Cancels the active streaming response.
-  func cancelStreamingText(completion: @escaping (Result<Void, Error>) -> Void)
+  /// Creates a native model session.
+  func createSession(instructions: String, completion: @escaping (Result<String, Error>) -> Void)
+  /// Releases the native resources associated with [session].
+  func disposeSession(session: String, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Generates a complete response for [prompt] in [session].
+  func generateText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, completion: @escaping (Result<LocalAiGenerationResponseMessage, Error>) -> Void)
+  /// Starts an asynchronous streaming response for [prompt] in [session].
+  func startStreamingText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Cancels the active streaming response for [session].
+  func cancelStreamingText(session: String, completion: @escaping (Result<Void, Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -476,13 +478,31 @@ class OnDeviceAiHostApiSetup {
     } else {
       availabilityChannel.setMessageHandler(nil)
     }
-    /// Stores system instructions for subsequent generations.
-    let initializeChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.initialize\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    /// Creates a native model session.
+    let createSessionChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.createSession\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      initializeChannel.setMessageHandler { message, reply in
+      createSessionChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let instructionsArg = args[0] as! String
-        api.initialize(instructions: instructionsArg) { result in
+        api.createSession(instructions: instructionsArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      createSessionChannel.setMessageHandler(nil)
+    }
+    /// Releases the native resources associated with [session].
+    let disposeSessionChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.disposeSession\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      disposeSessionChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let sessionArg = args[0] as! String
+        api.disposeSession(session: sessionArg) { result in
           switch result {
           case .success:
             reply(wrapResult(nil))
@@ -492,16 +512,17 @@ class OnDeviceAiHostApiSetup {
         }
       }
     } else {
-      initializeChannel.setMessageHandler(nil)
+      disposeSessionChannel.setMessageHandler(nil)
     }
-    /// Generates a complete response for [prompt].
+    /// Generates a complete response for [prompt] in [session].
     let generateTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.generateText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       generateTextChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
-        let promptArg = args[0] as! String
-        let configArg = args[1] as! LocalAiGenerationConfigMessage
-        api.generateText(prompt: promptArg, config: configArg) { result in
+        let sessionArg = args[0] as! String
+        let promptArg = args[1] as! String
+        let configArg = args[2] as! LocalAiGenerationConfigMessage
+        api.generateText(session: sessionArg, prompt: promptArg, config: configArg) { result in
           switch result {
           case .success(let res):
             reply(wrapResult(res))
@@ -513,14 +534,15 @@ class OnDeviceAiHostApiSetup {
     } else {
       generateTextChannel.setMessageHandler(nil)
     }
-    /// Starts an asynchronous streaming response for [prompt].
+    /// Starts an asynchronous streaming response for [prompt] in [session].
     let startStreamingTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.startStreamingText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       startStreamingTextChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
-        let promptArg = args[0] as! String
-        let configArg = args[1] as! LocalAiGenerationConfigMessage
-        api.startStreamingText(prompt: promptArg, config: configArg) { result in
+        let sessionArg = args[0] as! String
+        let promptArg = args[1] as! String
+        let configArg = args[2] as! LocalAiGenerationConfigMessage
+        api.startStreamingText(session: sessionArg, prompt: promptArg, config: configArg) { result in
           switch result {
           case .success:
             reply(wrapResult(nil))
@@ -532,11 +554,13 @@ class OnDeviceAiHostApiSetup {
     } else {
       startStreamingTextChannel.setMessageHandler(nil)
     }
-    /// Cancels the active streaming response.
+    /// Cancels the active streaming response for [session].
     let cancelStreamingTextChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.cancelStreamingText\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      cancelStreamingTextChannel.setMessageHandler { _, reply in
-        api.cancelStreamingText { result in
+      cancelStreamingTextChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let sessionArg = args[0] as! String
+        api.cancelStreamingText(session: sessionArg) { result in
           switch result {
           case .success:
             reply(wrapResult(nil))

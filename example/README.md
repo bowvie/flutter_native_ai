@@ -2,8 +2,9 @@
 
 Example app for `flutter_native_ai`.
 
-The app checks native model availability on launch, lets you edit a prompt, and
-streams generated text into the UI when the current device supports on-device AI.
+The app checks native model availability on launch, lets you edit a prompt,
+creates a local AI session, and streams generated text into the UI when the
+current device supports on-device AI.
 
 Run it on a physical device for meaningful results:
 

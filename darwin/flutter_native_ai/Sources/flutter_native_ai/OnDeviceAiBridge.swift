@@ -10,13 +10,24 @@ import Foundation
   import FoundationModels
 #endif
 
+#if canImport(FoundationModels)
+  @available(iOS 26.0, macOS 26.0, *)
+  private final class LocalAiSession {
+    let modelSession: LanguageModelSession
+
+    init(instructions: String) {
+      modelSession = LanguageModelSession(instructions: instructions)
+    }
+  }
+#endif
+
 /// Apple platform implementation of the Pigeon host API for Foundation Models.
 ///
 /// The bridge is compiled even when the active SDK does not include
 /// FoundationModels. Runtime availability checks keep unsupported OS versions
 /// and unavailable model states out of the Dart UI layer.
 final class OnDeviceAiBridge: OnDeviceAiHostApi {
-  private var instructions = ""
+  private var sessions: [String: Any] = [:]
   private let streamHandler = LocalAiGenerationStreamHandler()
 
   /// Registers the event-channel stream handler used by streaming generation.
@@ -32,10 +43,10 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
     completion(.success(currentAvailability()))
   }
 
-  /// Stores session instructions after confirming the model is available.
-  func initialize(
+  /// Creates a native Foundation Models session.
+  func createSession(
     instructions: String,
-    completion: @escaping (Result<Void, Error>) -> Void
+    completion: @escaping (Result<String, Error>) -> Void
   ) {
     let availability = currentAvailability()
     guard availability.isAvailable else {
@@ -47,12 +58,40 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
       return
     }
 
-    self.instructions = instructions
+    #if canImport(FoundationModels)
+      if #available(iOS 26.0, macOS 26.0, *) {
+        let session = UUID().uuidString
+        sessions[session] = LocalAiSession(instructions: instructions)
+        completion(.success(session))
+      } else {
+        completion(.failure(PigeonError(
+          code: "local-ai-unsupported-os",
+          message: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
+          details: nil
+        )))
+      }
+    #else
+      completion(.failure(PigeonError(
+        code: "local-ai-framework-unavailable",
+        message: "FoundationModels.framework is not available in this SDK.",
+        details: nil
+      )))
+    #endif
+  }
+
+  /// Releases the native Foundation Models session.
+  func disposeSession(
+    session: String,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
+    streamHandler.cancel(session: session)
+    sessions.removeValue(forKey: session)
     completion(.success(()))
   }
 
   /// Generates a complete response for one prompt.
   func generateText(
+    session: String,
     prompt: String,
     config: LocalAiGenerationConfigMessage,
     completion: @escaping (Result<LocalAiGenerationResponseMessage, Error>) -> Void
@@ -69,19 +108,26 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
 
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
-        let instructions = self.instructions
+        guard let localSession = sessions[session] as? LocalAiSession else {
+          completion(.failure(PigeonError(
+            code: "local-ai-session-not-found",
+            message: "The local AI session has already been disposed or was not created.",
+            details: nil
+          )))
+          return
+        }
+
         Task.detached(priority: .userInitiated) {
           let startTime = Date()
 
           do {
-            let session = LanguageModelSession(instructions: instructions)
             let response: LanguageModelSession.Response<String>
             let options = GenerationOptions(
               temperature: config.temperature,
               maximumResponseTokens: config.maxTokens.map(Int.init)
             )
 
-            response = try await session.respond(to: prompt, options: options)
+            response = try await localSession.modelSession.respond(to: prompt, options: options)
 
             DispatchQueue.main.async {
               completion(.success(LocalAiGenerationResponseMessage(
@@ -118,6 +164,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
 
   /// Starts a streaming response and returns chunks through the event channel.
   func startStreamingText(
+    session: String,
     prompt: String,
     config: LocalAiGenerationConfigMessage,
     completion: @escaping (Result<Void, Error>) -> Void
@@ -134,9 +181,19 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
 
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
+        guard let localSession = sessions[session] as? LocalAiSession else {
+          completion(.failure(PigeonError(
+            code: "local-ai-session-not-found",
+            message: "The local AI session has already been disposed or was not created.",
+            details: nil
+          )))
+          return
+        }
+
         streamHandler.start(
+          session: session,
           prompt: prompt,
-          instructions: instructions,
+          localSession: localSession,
           config: config
         )
         completion(.success(()))
@@ -157,8 +214,8 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   }
 
   /// Cancels the active streaming generation task.
-  func cancelStreamingText(completion: @escaping (Result<Void, Error>) -> Void) {
-    streamHandler.cancel()
+  func cancelStreamingText(session: String, completion: @escaping (Result<Void, Error>) -> Void) {
+    streamHandler.cancel(session: session)
     completion(.success(()))
   }
 
@@ -202,7 +259,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
   private var sink: PigeonEventSink<LocalAiStreamChunkMessage>?
 
   #if canImport(FoundationModels)
-    private var currentTask: Task<Void, Never>?
+    private var currentTasks: [String: Task<Void, Never>] = [:]
   #endif
 
   /// Stores the active event sink for later generation chunks.
@@ -215,16 +272,26 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
 
   /// Cancels generation and clears the event sink when Dart stops listening.
   override func onCancel(withArguments arguments: Any?) {
-    cancel()
+    cancelAll()
     sink = nil
   }
 
-  /// Cancels the active Foundation Models task.
-  func cancel() {
+  /// Cancels the active Foundation Models task for a session.
+  func cancel(session: String) {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
-        currentTask?.cancel()
-        currentTask = nil
+        currentTasks[session]?.cancel()
+        currentTasks[session] = nil
+      }
+    #endif
+  }
+
+  /// Cancels every active Foundation Models streaming task.
+  func cancelAll() {
+    #if canImport(FoundationModels)
+      if #available(iOS 26.0, macOS 26.0, *) {
+        currentTasks.values.forEach { $0.cancel() }
+        currentTasks.removeAll()
       }
     #endif
   }
@@ -232,23 +299,23 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
   #if canImport(FoundationModels)
     /// Starts a new Foundation Models streaming task.
     @available(iOS 26.0, macOS 26.0, *)
-    func start(
+    fileprivate func start(
+      session: String,
       prompt: String,
-      instructions: String,
+      localSession: LocalAiSession,
       config: LocalAiGenerationConfigMessage
     ) {
-      cancel()
+      cancel(session: session)
       let temperature = config.temperature
       let maximumResponseTokens = config.maxTokens.map(Int.init)
 
-      currentTask = Task.detached(priority: .userInitiated) { [weak self] in
+      currentTasks[session] = Task.detached(priority: .userInitiated) { [weak self] in
         do {
-          let session = LanguageModelSession(instructions: instructions)
           let options = GenerationOptions(
             temperature: temperature,
             maximumResponseTokens: maximumResponseTokens
           )
-          let stream = session.streamResponse(to: prompt, options: options)
+          let stream = localSession.modelSession.streamResponse(to: prompt, options: options)
           var latestText = ""
 
           for try await snapshot in stream {
@@ -273,6 +340,10 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
           await MainActor.run {
             self?.sendError(error)
           }
+        }
+
+        await MainActor.run {
+          self?.currentTasks[session] = nil
         }
       }
     }

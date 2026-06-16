@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:flutter_native_ai/flutter_native_ai.dart';
 import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
     as generated;
+import 'package:flutter_native_ai/src/on_device_ai_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -73,27 +73,26 @@ void main() {
       expect(availability.modelStatus, 'availability-failed');
     });
 
-    test('initializes with default instructions', () async {
+    test('creates a session with default empty instructions', () async {
       final api = _FakeLocalAiApi();
       final service = OnDeviceAi(api: api);
 
-      await service.initialize();
+      await service.createSession();
 
-      expect(
-        api.initializedInstructions,
-        'You are an on-device assistant. Keep answers short and practical.',
-      );
+      expect(api.createdInstructions, ['']);
     });
 
-    test('initializes with custom instructions', () async {
+    test('creates a session with custom instructions', () async {
       final api = _FakeLocalAiApi();
       final service = OnDeviceAi(api: api);
 
-      await service.initialize(instructions: 'Answer in one sentence.');
+      await service.createSession(instructions: 'Answer in one sentence.');
 
-      expect(api.initializedInstructions, 'Answer in one sentence.');
+      expect(api.createdInstructions, ['Answer in one sentence.']);
     });
+  });
 
+  group('OnDeviceAiSession', () {
     test('maps generation config and response', () async {
       final api = _FakeLocalAiApi(
         generationResponse: generated.LocalAiGenerationResponseMessage(
@@ -102,9 +101,11 @@ void main() {
           durationMs: 42,
         ),
       );
-      final service = OnDeviceAi(api: api);
+      final session = await OnDeviceAi(
+        api: api,
+      ).createSession(instructions: 'Stay brief.');
 
-      final result = await service.generateText(
+      final result = await session.generateText(
         prompt: 'Summarize item.',
         config: const OnDeviceAiGenerationConfig(
           maxTokens: 64,
@@ -112,6 +113,8 @@ void main() {
         ),
       );
 
+      expect(api.createdInstructions, ['Stay brief.']);
+      expect(api.lastSession, 'session-1');
       expect(api.lastPrompt, 'Summarize item.');
       expect(api.lastConfig?.maxTokens, 64);
       expect(api.lastConfig?.temperature, 0.2);
@@ -130,9 +133,9 @@ void main() {
           ),
         ],
       );
-      final service = OnDeviceAi(api: api);
+      final session = await OnDeviceAi(api: api).createSession();
 
-      final chunks = await service
+      final chunks = await session
           .generateTextStream(
             prompt: 'Name this binder.',
             config: const OnDeviceAiGenerationConfig(
@@ -142,6 +145,7 @@ void main() {
           )
           .toList();
 
+      expect(api.startedStreamSession, 'session-1');
       expect(api.startedStreamPrompt, 'Name this binder.');
       expect(api.startedStreamConfig?.maxTokens, 24);
       expect(api.startedStreamConfig?.temperature, 0.1);
@@ -159,9 +163,9 @@ void main() {
           ),
         ],
       );
-      final service = OnDeviceAi(api: api);
+      final session = await OnDeviceAi(api: api).createSession();
 
-      final chunks = await service
+      final chunks = await session
           .generateTextStream(prompt: 'Stop after done.')
           .toList();
 
@@ -176,10 +180,10 @@ void main() {
           message: 'Stream failed',
         ),
       );
-      final service = OnDeviceAi(api: api);
+      final session = await OnDeviceAi(api: api).createSession();
 
       await expectLater(
-        service.generateTextStream(prompt: 'Fail from stream.').toList(),
+        session.generateTextStream(prompt: 'Fail from stream.').toList(),
         throwsA(isA<PlatformException>()),
       );
       expect(api.generationStreamCancelled, isTrue);
@@ -196,9 +200,9 @@ void main() {
           ),
         ],
       );
-      final service = OnDeviceAi(api: api);
+      final session = await OnDeviceAi(api: api).createSession();
 
-      final chunks = await service
+      final chunks = await session
           .generateTextStream(prompt: 'Surface native terminal errors.')
           .toList();
 
@@ -219,10 +223,10 @@ void main() {
             message: 'Start failed',
           ),
         );
-        final service = OnDeviceAi(api: api);
+        final session = await OnDeviceAi(api: api).createSession();
 
         await expectLater(
-          service.generateTextStream(prompt: 'Fail to start.').toList(),
+          session.generateTextStream(prompt: 'Fail to start.').toList(),
           throwsA(isA<PlatformException>()),
         );
         expect(api.generationStreamCancelled, isTrue);
@@ -238,11 +242,11 @@ void main() {
             generated.LocalAiStreamChunkMessage(text: 'Second', isDone: false),
           ],
         );
-        final service = OnDeviceAi(api: api);
+        final session = await OnDeviceAi(api: api).createSession();
 
         late final StreamSubscription<OnDeviceAiStreamChunk> subscription;
         final firstChunk = Completer<void>();
-        subscription = service
+        subscription = session
             .generateTextStream(prompt: 'Cancel early.')
             .listen((chunk) {
               if (!firstChunk.isCompleted) {
@@ -253,18 +257,45 @@ void main() {
         await firstChunk.future;
         await pumpEventQueue();
 
-        expect(api.cancelledStream, isTrue);
+        expect(api.cancelledStreamSession, 'session-1');
         expect(api.generationStreamCancelled, isTrue);
       },
     );
 
     test('forwards explicit stream cancellation', () async {
       final api = _FakeLocalAiApi();
-      final service = OnDeviceAi(api: api);
+      final session = await OnDeviceAi(api: api).createSession();
 
-      await service.cancelStreamingText();
+      await session.cancelStreamingText();
 
-      expect(api.cancelledStream, isTrue);
+      expect(api.cancelledStreamSession, 'session-1');
+    });
+
+    test('disposes native session once', () async {
+      final api = _FakeLocalAiApi();
+      final session = await OnDeviceAi(api: api).createSession();
+
+      await session.dispose();
+      await session.dispose();
+
+      expect(api.disposedSessions, ['session-1']);
+      expect(session.isDisposed, isTrue);
+    });
+
+    test('throws when used after disposal', () async {
+      final session = await OnDeviceAi(api: _FakeLocalAiApi()).createSession();
+
+      await session.dispose();
+
+      expect(
+        () => session.generateText(prompt: 'Nope.'),
+        throwsA(isA<StateError>()),
+      );
+      expect(
+        () => session.generateTextStream(prompt: 'Nope.'),
+        throwsA(isA<StateError>()),
+      );
+      expect(() => session.cancelStreamingText(), throwsA(isA<StateError>()));
     });
   });
 }
@@ -286,12 +317,15 @@ class _FakeLocalAiApi implements OnDeviceAiApi {
   final Exception? streamError;
   final Exception? startStreamError;
 
-  String? initializedInstructions;
+  final createdInstructions = <String>[];
+  final disposedSessions = <String>[];
+  String? lastSession;
   String? lastPrompt;
   generated.LocalAiGenerationConfigMessage? lastConfig;
+  String? startedStreamSession;
   String? startedStreamPrompt;
   generated.LocalAiGenerationConfigMessage? startedStreamConfig;
-  bool cancelledStream = false;
+  String? cancelledStreamSession;
   bool generationStreamCancelled = false;
 
   @override
@@ -309,15 +343,23 @@ class _FakeLocalAiApi implements OnDeviceAiApi {
   }
 
   @override
-  Future<void> initialize(String instructions) async {
-    initializedInstructions = instructions;
+  Future<String> createSession(String instructions) async {
+    createdInstructions.add(instructions);
+    return 'session-${createdInstructions.length}';
+  }
+
+  @override
+  Future<void> disposeSession(String session) async {
+    disposedSessions.add(session);
   }
 
   @override
   Future<generated.LocalAiGenerationResponseMessage> generateText(
+    String session,
     String prompt,
     generated.LocalAiGenerationConfigMessage config,
   ) async {
+    lastSession = session;
     lastPrompt = prompt;
     lastConfig = config;
     return generationResponse ??
@@ -326,9 +368,11 @@ class _FakeLocalAiApi implements OnDeviceAiApi {
 
   @override
   Future<void> startStreamingText(
+    String session,
     String prompt,
     generated.LocalAiGenerationConfigMessage config,
   ) async {
+    startedStreamSession = session;
     startedStreamPrompt = prompt;
     startedStreamConfig = config;
     final error = startStreamError;
@@ -338,8 +382,8 @@ class _FakeLocalAiApi implements OnDeviceAiApi {
   }
 
   @override
-  Future<void> cancelStreamingText() async {
-    cancelledStream = true;
+  Future<void> cancelStreamingText(String session) async {
+    cancelledStreamSession = session;
   }
 
   @override
