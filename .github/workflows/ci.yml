@@ -27,8 +27,8 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
-      - name: Test
-        run: flutter test
+      - name: Test Dart implementation and bridges
+        run: flutter test test
 
       - name: Publish dry run
         run: dart pub publish --dry-run

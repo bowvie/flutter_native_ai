@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_native_ai/flutter_native_ai.dart';
 import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
     as generated;
-import 'package:flutter_native_ai/flutter_native_ai.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('OnDeviceAi', () {
@@ -38,6 +38,61 @@ void main() {
         expect(availability.modelStatus, 'unsupported-platform');
       },
     );
+
+    test('maps platform availability errors into unavailable state', () async {
+      final service = OnDeviceAi(
+        api: _FakeLocalAiApi(
+          availabilityError: PlatformException(
+            code: 'availability-failed',
+            message: 'Model status could not be read.',
+          ),
+        ),
+      );
+
+      final availability = await service.availability();
+
+      expect(availability.isAvailable, isFalse);
+      expect(availability.reason, 'Model status could not be read.');
+      expect(availability.modelStatus, 'availability-failed');
+    });
+
+    test('uses fallback availability message for platform errors', () async {
+      final service = OnDeviceAi(
+        api: _FakeLocalAiApi(
+          availabilityError: PlatformException(code: 'availability-failed'),
+        ),
+      );
+
+      final availability = await service.availability();
+
+      expect(availability.isAvailable, isFalse);
+      expect(
+        availability.reason,
+        'Local AI availability could not be checked.',
+      );
+      expect(availability.modelStatus, 'availability-failed');
+    });
+
+    test('initializes with default instructions', () async {
+      final api = _FakeLocalAiApi();
+      final service = OnDeviceAi(api: api);
+
+      await service.initialize();
+
+      expect(
+        api.initializedInstructions,
+        'You are an on-device assistant. Keep answers short and practical.',
+      );
+    });
+
+    test('initializes with custom instructions', () async {
+      final api = _FakeLocalAiApi();
+      final service = OnDeviceAi(api: api);
+
+      await service.initialize(instructions: 'Answer in one sentence.');
+
+      expect(api.initializedInstructions, 'Answer in one sentence.');
+    });
 
     test('maps generation config and response', () async {
       final api = _FakeLocalAiApi(
@@ -130,6 +185,31 @@ void main() {
       expect(api.generationStreamCancelled, isTrue);
     });
 
+    test('maps terminal error chunks without throwing', () async {
+      final api = _FakeLocalAiApi(
+        streamChunks: [
+          generated.LocalAiStreamChunkMessage(
+            text: 'Partial text',
+            isDone: true,
+            errorCode: 'local-ai-generation-failed',
+            errorMessage: 'Generation failed.',
+          ),
+        ],
+      );
+      final service = OnDeviceAi(api: api);
+
+      final chunks = await service
+          .generateTextStream(prompt: 'Surface native terminal errors.')
+          .toList();
+
+      expect(chunks, hasLength(1));
+      expect(chunks.single.text, 'Partial text');
+      expect(chunks.single.isDone, isTrue);
+      expect(chunks.single.errorCode, 'local-ai-generation-failed');
+      expect(chunks.single.errorMessage, 'Generation failed.');
+      expect(api.generationStreamCancelled, isTrue);
+    });
+
     test(
       'closes the generation stream when starting generation fails',
       () async {
@@ -148,6 +228,44 @@ void main() {
         expect(api.generationStreamCancelled, isTrue);
       },
     );
+
+    test(
+      'cancels native generation when stream subscription is cancelled',
+      () async {
+        final api = _FakeLocalAiApi(
+          streamChunks: [
+            generated.LocalAiStreamChunkMessage(text: 'First', isDone: false),
+            generated.LocalAiStreamChunkMessage(text: 'Second', isDone: false),
+          ],
+        );
+        final service = OnDeviceAi(api: api);
+
+        late final StreamSubscription<OnDeviceAiStreamChunk> subscription;
+        final firstChunk = Completer<void>();
+        subscription = service
+            .generateTextStream(prompt: 'Cancel early.')
+            .listen((chunk) {
+              if (!firstChunk.isCompleted) {
+                firstChunk.complete();
+              }
+              unawaited(subscription.cancel());
+            });
+        await firstChunk.future;
+        await pumpEventQueue();
+
+        expect(api.cancelledStream, isTrue);
+        expect(api.generationStreamCancelled, isTrue);
+      },
+    );
+
+    test('forwards explicit stream cancellation', () async {
+      final api = _FakeLocalAiApi();
+      final service = OnDeviceAi(api: api);
+
+      await service.cancelStreamingText();
+
+      expect(api.cancelledStream, isTrue);
+    });
   });
 }
 

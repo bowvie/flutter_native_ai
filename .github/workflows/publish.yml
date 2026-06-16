@@ -12,9 +12,36 @@ on:
     # If your repository contains multiple packages consider a pattern like:
     # - 'my_package_name-v[0-9]+.[0-9]+.[0-9]+'
 
-# Publish using the reusable workflow from dart-lang.
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify formatting
+        run: dart format --set-exit-if-changed lib test pigeons example/lib example/test example/integration_test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test Dart implementation and bridges
+        run: flutter test test
+
+      - name: Publish dry run
+        run: dart pub publish --dry-run
+
+  # Publish using the reusable workflow from dart-lang after package checks pass.
   publish:
+    needs: verify
     permissions:
       id-token: write # Required for authentication using OIDC
     uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
