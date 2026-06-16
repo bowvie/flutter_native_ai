@@ -275,8 +275,16 @@ class OnDeviceAiSession {
       return;
     }
 
+    // Mark disposed up front so concurrent calls don't double-dispose, but
+    // revert if the native call fails so the session stays usable and the
+    // native resources can be released by a later retry.
     _isDisposed = true;
-    await _api.disposeSession(_session);
+    try {
+      await _api.disposeSession(_session);
+    } catch (_) {
+      _isDisposed = false;
+      rethrow;
+    }
   }
 
   void _ensureActive() {

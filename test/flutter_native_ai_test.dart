@@ -285,6 +285,24 @@ void main() {
       expect(session.isDisposed, isTrue);
     });
 
+    test('stays usable when native disposal fails', () async {
+      final api = _FakeHostApi(
+        disposeError: PlatformException(code: 'dispose-failed'),
+      );
+      final session = await _serviceFor(api).createSession();
+
+      await expectLater(
+        session.dispose(),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(session.isDisposed, isFalse);
+
+      api.disposeError = null;
+      await session.dispose();
+      expect(session.isDisposed, isTrue);
+      expect(api.disposedSessions, ['session-1']);
+    });
+
     test('throws when used after disposal', () async {
       final session = await _serviceFor(_FakeHostApi()).createSession();
 
@@ -311,6 +329,7 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
     this.streamChunks = const [],
     this.streamError,
     this.startStreamError,
+    this.disposeError,
   });
 
   final generated.LocalAiAvailabilityMessage? availabilityResponse;
@@ -319,6 +338,7 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
   final List<generated.LocalAiStreamChunkMessage> streamChunks;
   final Exception? streamError;
   final Exception? startStreamError;
+  Exception? disposeError;
 
   final createdInstructions = <String>[];
   final disposedSessions = <String>[];
@@ -353,6 +373,10 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
 
   @override
   Future<void> disposeSession(String session) async {
+    final error = disposeError;
+    if (error != null) {
+      throw error;
+    }
     disposedSessions.add(session);
   }
 

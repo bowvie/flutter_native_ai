@@ -10,17 +10,22 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 private const val LOCAL_AI_UNAVAILABLE = "local-ai-unavailable"
 private const val LOCAL_AI_GENERATION_FAILED = "local-ai-generation-failed"
 private const val DEFAULT_MAX_OUTPUT_TOKENS = 160
 private const val ML_KIT_MAX_OUTPUT_TOKENS = 256
+
+/** Maximum number of stored conversation messages (user + assistant turns). */
+private const val MAX_HISTORY_MESSAGES = 20
 
 /**
  * Android implementation of the Pigeon host API for Gemini Nano through ML Kit.
@@ -262,6 +267,9 @@ private class LocalAiSession(
     fun record(prompt: String, response: String) {
         messages.add(LocalAiMessage("User", prompt))
         messages.add(LocalAiMessage("Assistant", response))
+        if (messages.size > MAX_HISTORY_MESSAGES) {
+            messages.subList(0, messages.size - MAX_HISTORY_MESSAGES).clear()
+        }
     }
 }
 
@@ -271,7 +279,7 @@ private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val generationClient = Generation.getClient()
     private var sink: PigeonEventSink<LocalAiStreamChunkMessage>? = null
-    private val currentJobs = mutableMapOf<String, Job>()
+    private val currentJobs = ConcurrentHashMap<String, Job>()
 
     override fun onListen(p0: Any?, sink: PigeonEventSink<LocalAiStreamChunkMessage>) {
         this.sink = sink
@@ -288,7 +296,10 @@ private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
         localSession: LocalAiSession,
         config: LocalAiGenerationConfigMessage,
     ) {
-        cancel(session)
+        // Streaming chunks share a single event channel without a session id, so
+        // only one generation may stream at a time per plugin instance. Cancel
+        // any in-flight stream (for this or another session) before starting.
+        cancelAll()
 
         currentJobs[session] = scope.launch {
             val latestText = StringBuilder()
@@ -313,7 +324,18 @@ private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
                 )
                 localSession.record(prompt, latestText.toString())
             } catch (error: CancellationException) {
-                // Dart owns stream cancellation and closes the UI stream itself.
+                // Cancellation can be initiated natively (e.g. disposeSession or
+                // a new stream starting). Emit a terminal chunk in a
+                // non-cancellable context so any active Dart listener completes
+                // deterministically instead of hanging.
+                withContext(NonCancellable) {
+                    emit(
+                        LocalAiStreamChunkMessage(
+                            text = latestText.toString(),
+                            isDone = true,
+                        ),
+                    )
+                }
             } catch (error: Throwable) {
                 emit(
                     LocalAiStreamChunkMessage(
@@ -324,9 +346,7 @@ private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
                     ),
                 )
             } finally {
-                if (currentJobs[session] == coroutineContext[Job]) {
-                    currentJobs.remove(session)
-                }
+                currentJobs.remove(session, coroutineContext[Job])
             }
         }
     }

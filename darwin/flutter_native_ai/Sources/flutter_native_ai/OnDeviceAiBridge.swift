@@ -48,18 +48,18 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
     instructions: String,
     completion: @escaping (Result<String, Error>) -> Void
   ) {
-    let availability = currentAvailability()
-    guard availability.isAvailable else {
-      completion(.failure(PigeonError(
-        code: "local-ai-unavailable",
-        message: availability.reason,
-        details: availability.modelStatus
-      )))
-      return
-    }
-
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
+        let availability = currentAvailability()
+        guard availability.isAvailable else {
+          completion(.failure(PigeonError(
+            code: "local-ai-unavailable",
+            message: availability.reason,
+            details: availability.modelStatus
+          )))
+          return
+        }
+
         let session = UUID().uuidString
         sessions[session] = LocalAiSession(instructions: instructions)
         completion(.success(session))
@@ -96,18 +96,18 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
     config: LocalAiGenerationConfigMessage,
     completion: @escaping (Result<LocalAiGenerationResponseMessage, Error>) -> Void
   ) {
-    let availability = currentAvailability()
-    guard availability.isAvailable else {
-      completion(.failure(PigeonError(
-        code: "local-ai-unavailable",
-        message: availability.reason,
-        details: availability.modelStatus
-      )))
-      return
-    }
-
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
+        let availability = currentAvailability()
+        guard availability.isAvailable else {
+          completion(.failure(PigeonError(
+            code: "local-ai-unavailable",
+            message: availability.reason,
+            details: availability.modelStatus
+          )))
+          return
+        }
+
         guard let localSession = sessions[session] as? LocalAiSession else {
           completion(.failure(PigeonError(
             code: "local-ai-session-not-found",
@@ -169,18 +169,18 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
     config: LocalAiGenerationConfigMessage,
     completion: @escaping (Result<Void, Error>) -> Void
   ) {
-    let availability = currentAvailability()
-    guard availability.isAvailable else {
-      completion(.failure(PigeonError(
-        code: "local-ai-unavailable",
-        message: availability.reason,
-        details: availability.modelStatus
-      )))
-      return
-    }
-
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
+        let availability = currentAvailability()
+        guard availability.isAvailable else {
+          completion(.failure(PigeonError(
+            code: "local-ai-unavailable",
+            message: availability.reason,
+            details: availability.modelStatus
+          )))
+          return
+        }
+
         guard let localSession = sessions[session] as? LocalAiSession else {
           completion(.failure(PigeonError(
             code: "local-ai-session-not-found",
@@ -254,7 +254,12 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   }
 }
 
-/// Event-channel handler that owns a single active streaming generation task.
+/// Event-channel handler for streaming generation.
+///
+/// Streaming chunks share a single event channel without a session identifier,
+/// so only one streaming generation may be active at a time per plugin
+/// instance. Tasks are tracked per session so cancellation can target the
+/// originating session, but starting a new stream cancels any in-flight one.
 final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
   private var sink: PigeonEventSink<LocalAiStreamChunkMessage>?
 
@@ -305,7 +310,10 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       localSession: LocalAiSession,
       config: LocalAiGenerationConfigMessage
     ) {
-      cancel(session: session)
+      // Streaming chunks share a single event channel without a session id, so
+      // only one generation may stream at a time per plugin instance. Cancel
+      // any in-flight stream (for this or another session) before starting.
+      cancelAll()
       let temperature = config.temperature
       let maximumResponseTokens = config.maxTokens.map(Int.init)
 
