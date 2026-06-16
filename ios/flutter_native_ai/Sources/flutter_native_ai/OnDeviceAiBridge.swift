@@ -1,12 +1,16 @@
-import Flutter
 import Foundation
-import UIKit
+
+#if os(iOS)
+  import Flutter
+#elseif os(macOS)
+  import FlutterMacOS
+#endif
 
 #if canImport(FoundationModels)
   import FoundationModels
 #endif
 
-/// iOS implementation of the Pigeon host API for Apple Foundation Models.
+/// Apple platform implementation of the Pigeon host API for Foundation Models.
 ///
 /// The bridge is compiled even when the active SDK does not include
 /// FoundationModels. Runtime availability checks keep unsupported OS versions
@@ -64,7 +68,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
     }
 
     #if canImport(FoundationModels)
-      if #available(iOS 26.0, *) {
+      if #available(iOS 26.0, macOS 26.0, *) {
         let instructions = self.instructions
         Task.detached(priority: .userInitiated) {
           let startTime = Date()
@@ -99,7 +103,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
       } else {
         completion(.failure(PigeonError(
           code: "local-ai-unsupported-os",
-          message: "Apple Foundation Models requires iOS 26.0 or later.",
+          message: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
           details: nil
         )))
       }
@@ -129,7 +133,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
     }
 
     #if canImport(FoundationModels)
-      if #available(iOS 26.0, *) {
+      if #available(iOS 26.0, macOS 26.0, *) {
         streamHandler.start(
           prompt: prompt,
           instructions: instructions,
@@ -139,7 +143,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
       } else {
         completion(.failure(PigeonError(
           code: "local-ai-unsupported-os",
-          message: "Apple Foundation Models requires iOS 26.0 or later.",
+          message: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
           details: nil
         )))
       }
@@ -161,7 +165,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   /// Maps Foundation Models availability into a stable Pigeon message.
   private func currentAvailability() -> LocalAiAvailabilityMessage {
     #if canImport(FoundationModels)
-      if #available(iOS 26.0, *) {
+      if #available(iOS 26.0, macOS 26.0, *) {
         switch SystemLanguageModel.default.availability {
         case .available:
           return LocalAiAvailabilityMessage(
@@ -187,7 +191,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
 
     return LocalAiAvailabilityMessage(
       isAvailable: false,
-      reason: "Apple Foundation Models requires iOS 26.0 or later.",
+      reason: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
       modelStatus: "unsupported-os"
     )
   }
@@ -218,7 +222,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
   /// Cancels the active Foundation Models task.
   func cancel() {
     #if canImport(FoundationModels)
-      if #available(iOS 26.0, *) {
+      if #available(iOS 26.0, macOS 26.0, *) {
         currentTask?.cancel()
         currentTask = nil
       }
@@ -227,7 +231,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
 
   #if canImport(FoundationModels)
     /// Starts a new Foundation Models streaming task.
-    @available(iOS 26.0, *)
+    @available(iOS 26.0, macOS 26.0, *)
     func start(
       prompt: String,
       instructions: String,
