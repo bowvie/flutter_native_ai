@@ -93,24 +93,33 @@ abstract class OnDeviceAiHostApi {
   @async
   LocalAiAvailabilityMessage availability();
 
-  /// Stores system instructions for subsequent generations.
+  /// Creates a native model session.
   @async
-  void initialize(String instructions);
+  String createSession(String instructions);
 
-  /// Generates a complete response for [prompt].
+  /// Releases the native resources associated with [session].
+  @async
+  void disposeSession(String session);
+
+  /// Generates a complete response for [prompt] in [session].
   @async
   LocalAiGenerationResponseMessage generateText(
+    String session,
     String prompt,
     LocalAiGenerationConfigMessage config,
   );
 
-  /// Starts an asynchronous streaming response for [prompt].
+  /// Starts an asynchronous streaming response for [prompt] in [session].
   @async
-  void startStreamingText(String prompt, LocalAiGenerationConfigMessage config);
+  void startStreamingText(
+    String session,
+    String prompt,
+    LocalAiGenerationConfigMessage config,
+  );
 
-  /// Cancels the active streaming response.
+  /// Cancels the active streaming response for [session].
   @async
-  void cancelStreamingText();
+  void cancelStreamingText(String session);
 }
 
 /// Event stream used for local AI streaming text snapshots.

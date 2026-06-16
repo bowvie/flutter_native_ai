@@ -69,16 +69,21 @@ class _OnDeviceAiExampleScreenState extends State<OnDeviceAiExampleScreen> {
     });
 
     try {
-      await _ai.initialize(instructions: 'You are concise and practical.');
-
-      await for (final chunk in _ai.generateTextStream(
-        prompt: _promptController.text,
-        config: const OnDeviceAiGenerationConfig(maxTokens: 120),
-      )) {
-        if (!mounted) {
-          return;
+      final session = await _ai.createSession(
+        instructions: 'You are concise and practical.',
+      );
+      try {
+        await for (final chunk in session.generateTextStream(
+          prompt: _promptController.text,
+          config: const OnDeviceAiGenerationConfig(maxTokens: 120),
+        )) {
+          if (!mounted) {
+            return;
+          }
+          setState(() => _output = chunk.text);
         }
-        setState(() => _output = chunk.text);
+      } finally {
+        await session.dispose();
       }
     } catch (error) {
       if (!mounted) {

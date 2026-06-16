@@ -413,10 +413,10 @@ class OnDeviceAiHostApi {
     return pigeonVar_replyValue! as LocalAiAvailabilityMessage;
   }
 
-  /// Stores system instructions for subsequent generations.
-  Future<void> initialize(String instructions) async {
+  /// Creates a native model session.
+  Future<String> createSession(String instructions) async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.initialize$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.createSession$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -427,6 +427,28 @@ class OnDeviceAiHostApi {
     );
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
+    return pigeonVar_replyValue! as String;
+  }
+
+  /// Releases the native resources associated with [session].
+  Future<void> disposeSession(String session) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.disposeSession$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[session],
+    );
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
     _extractReplyValueOrThrow(
       pigeonVar_replyList,
       pigeonVar_channelName,
@@ -434,8 +456,9 @@ class OnDeviceAiHostApi {
     );
   }
 
-  /// Generates a complete response for [prompt].
+  /// Generates a complete response for [prompt] in [session].
   Future<LocalAiGenerationResponseMessage> generateText(
+    String session,
     String prompt,
     LocalAiGenerationConfigMessage config,
   ) async {
@@ -447,7 +470,7 @@ class OnDeviceAiHostApi {
       binaryMessenger: pigeonVar_binaryMessenger,
     );
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
-      <Object?>[prompt, config],
+      <Object?>[session, prompt, config],
     );
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
@@ -459,8 +482,9 @@ class OnDeviceAiHostApi {
     return pigeonVar_replyValue! as LocalAiGenerationResponseMessage;
   }
 
-  /// Starts an asynchronous streaming response for [prompt].
+  /// Starts an asynchronous streaming response for [prompt] in [session].
   Future<void> startStreamingText(
+    String session,
     String prompt,
     LocalAiGenerationConfigMessage config,
   ) async {
@@ -472,7 +496,7 @@ class OnDeviceAiHostApi {
       binaryMessenger: pigeonVar_binaryMessenger,
     );
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
-      <Object?>[prompt, config],
+      <Object?>[session, prompt, config],
     );
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
@@ -483,8 +507,8 @@ class OnDeviceAiHostApi {
     );
   }
 
-  /// Cancels the active streaming response.
-  Future<void> cancelStreamingText() async {
+  /// Cancels the active streaming response for [session].
+  Future<void> cancelStreamingText(String session) async {
     final pigeonVar_channelName =
         'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.cancelStreamingText$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
@@ -492,7 +516,9 @@ class OnDeviceAiHostApi {
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[session],
+    );
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     _extractReplyValueOrThrow(

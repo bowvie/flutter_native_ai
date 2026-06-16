@@ -1,3 +1,16 @@
+## Unreleased
+
+- Replaces service-level initialization and generation with explicit
+    `OnDeviceAiSession` creation.
+- Adds session-scoped non-streaming generation, streaming generation,
+    cancellation, and disposal.
+- Documents that only one streaming generation should be active at a time for a
+    plugin instance.
+- Reuses native Apple Foundation Models sessions across prompts in the same
+    Dart session.
+- Keeps per-session Android instructions and prompt history for Gemini Nano
+    requests.
+
 ## 0.2.0
 
 - Adds macOS plugin registration and an example macOS runner.

@@ -4,7 +4,7 @@ A Flutter plugin for private, on-device text generation using native platform AI
 models. It gives Flutter apps one small Dart API over Apple Foundation Models on
 Apple platforms and Gemini Nano through ML Kit Prompt API on Android.
 
-The package exposes one Dart API for checking availability, initializing a local
+The package exposes one Dart API for checking availability, creating a local
 model session, generating a complete response, and streaming cumulative text
 updates.
 
@@ -38,37 +38,49 @@ if (!availability.isAvailable) {
   return;
 }
 
-await ai.initialize(
+final session = await ai.createSession(
   instructions: 'You are a concise assistant. Keep answers practical.',
 );
 
-final result = await ai.generateText(
-  prompt: 'Write one sentence about on-device AI.',
-  config: const OnDeviceAiGenerationConfig(
-    maxTokens: 80,
-    temperature: 0.4,
-  ),
-);
+try {
+  final result = await session.generateText(
+    prompt: 'Write one sentence about on-device AI.',
+    config: const OnDeviceAiGenerationConfig(
+      maxTokens: 80,
+      temperature: 0.4,
+    ),
+  );
 
-print(result.text);
+  print(result.text);
+} finally {
+  await session.dispose();
+}
 ```
 
 Streaming:
 
 ```dart
-await for (final chunk in ai.generateTextStream(
-  prompt: 'Summarize this in two short sentences.',
-)) {
-  print(chunk.text);
+final session = await ai.createSession();
+try {
+  await for (final chunk in session.generateTextStream(
+    prompt: 'Summarize this in two short sentences.',
+  )) {
+    print(chunk.text);
+  }
+} finally {
+  await session.dispose();
 }
 ```
 
 Stream chunks are cumulative snapshots. If the model emits `"Hello"` and then
 `"Hello world"`, the stream emits both snapshots rather than only the delta.
+Only one streaming generation should be active at a time for a plugin instance.
+Reuse the same `OnDeviceAiSession` for related prompts when you want native
+session context to be retained. Dispose the session when that flow is finished.
 
 ## Availability
 
-Always call `availability()` before initializing or generating text. Native model
+Always call `availability()` before creating a session. Native model
 availability depends on the OS, device, regional/account settings, and whether
 the local model is present.
 
@@ -97,10 +109,14 @@ Models:
 Methods:
 
 - `availability()`
-- `initialize({String? instructions})`
+- `createSession({String? instructions})`
+
+Session methods:
+
 - `generateText({required String prompt, OnDeviceAiGenerationConfig config})`
 - `generateTextStream({required String prompt, OnDeviceAiGenerationConfig config})`
 - `cancelStreamingText()`
+- `dispose()`
 
 ## Regenerating Platform Bindings
 

@@ -1,7 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
     as generated;
-import 'package:flutter_native_ai/src/on_device_ai_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -81,9 +80,8 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
-      final availability = await adapter.availability();
+      final availability = await hostApi.availability();
 
       expect(availability.isAvailable, isTrue);
       expect(availability.modelStatus, 'available');
@@ -91,14 +89,49 @@ void main() {
       expect(calls.single.message, isNull);
     });
 
+    test('creates and disposes native sessions over the bridge', () async {
+      _setHostHandler(messenger, 'createSession', suffix, calls, (
+        message,
+      ) async {
+        final args = message! as List<Object?>;
+
+        expect(args.single, 'Keep answers short.');
+
+        return <Object?>['session-1'];
+      });
+      _setHostHandler(messenger, 'disposeSession', suffix, calls, (
+        message,
+      ) async {
+        final args = message! as List<Object?>;
+
+        expect(args.single, 'session-1');
+
+        return <Object?>[null];
+      });
+      final hostApi = generated.OnDeviceAiHostApi(
+        binaryMessenger: messenger,
+        messageChannelSuffix: suffix,
+      );
+
+      final session = await hostApi.createSession('Keep answers short.');
+      await hostApi.disposeSession(session);
+
+      expect(session, 'session-1');
+      expect(calls.map((call) => call.channelName), [
+        _hostChannel('createSession', suffix),
+        _hostChannel('disposeSession', suffix),
+      ]);
+    });
+
     test('sends prompt and generation config over the bridge', () async {
       _setHostHandler(messenger, 'generateText', suffix, calls, (
         message,
       ) async {
         final args = message! as List<Object?>;
-        final config = args[1]! as generated.LocalAiGenerationConfigMessage;
+        final config = args[2]! as generated.LocalAiGenerationConfigMessage;
 
-        expect(args[0], 'Summarize privately.');
+        expect(args[0], 'session-1');
+        expect(args[1], 'Summarize privately.');
         expect(config.maxTokens, 96);
         expect(config.temperature, 0.25);
 
@@ -114,9 +147,9 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
-      final response = await adapter.generateText(
+      final response = await hostApi.generateText(
+        'session-1',
         'Summarize privately.',
         generated.LocalAiGenerationConfigMessage(
           maxTokens: 96,
@@ -141,10 +174,10 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
       await expectLater(
-        adapter.generateText(
+        hostApi.generateText(
+          'session-1',
           'Hello',
           generated.LocalAiGenerationConfigMessage(),
         ),
@@ -162,10 +195,9 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
       await expectLater(
-        adapter.availability(),
+        hostApi.availability(),
         throwsA(
           isA<PlatformException>()
               .having((error) => error.code, 'code', 'channel-error')
@@ -232,7 +264,8 @@ void main() {
 
 const _hostMethods = <String>[
   'availability',
-  'initialize',
+  'createSession',
+  'disposeSession',
   'generateText',
   'startStreamingText',
   'cancelStreamingText',
