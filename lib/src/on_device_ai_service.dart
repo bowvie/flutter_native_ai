@@ -80,89 +80,21 @@ class OnDeviceAiStreamChunk {
   final String? errorMessage;
 }
 
-/// Testable boundary around the generated Pigeon API.
-abstract class OnDeviceAiApi {
-  /// Checks whether local AI is available on the current host.
-  Future<generated.LocalAiAvailabilityMessage> availability();
-
-  /// Creates a native model session.
-  Future<String> createSession(String instructions);
-
-  /// Releases native resources held by [session].
-  Future<void> disposeSession(String session);
-
-  /// Generates a complete response for [prompt] inside [session].
-  Future<generated.LocalAiGenerationResponseMessage> generateText(
-    String session,
-    String prompt,
-    generated.LocalAiGenerationConfigMessage config,
-  );
-
-  /// Starts a streaming generation request for [prompt] inside [session].
-  Future<void> startStreamingText(
-    String session,
-    String prompt,
-    generated.LocalAiGenerationConfigMessage config,
-  );
-
-  /// Cancels the active streaming request for [session], if any.
-  Future<void> cancelStreamingText(String session);
-
-  /// Emits text snapshots for the active streaming request.
-  Stream<generated.LocalAiStreamChunkMessage> generationStream();
-}
-
-/// Adapter that connects the app service to the generated Pigeon host API.
-class OnDeviceAiHostApiAdapter implements OnDeviceAiApi {
-  OnDeviceAiHostApiAdapter({generated.OnDeviceAiHostApi? hostApi})
-    : _hostApi = hostApi ?? generated.OnDeviceAiHostApi();
-
-  final generated.OnDeviceAiHostApi _hostApi;
-
-  @override
-  Future<generated.LocalAiAvailabilityMessage> availability() =>
-      _hostApi.availability();
-
-  @override
-  Future<String> createSession(String instructions) =>
-      _hostApi.createSession(instructions);
-
-  @override
-  Future<void> disposeSession(String session) =>
-      _hostApi.disposeSession(session);
-
-  @override
-  Future<generated.LocalAiGenerationResponseMessage> generateText(
-    String session,
-    String prompt,
-    generated.LocalAiGenerationConfigMessage config,
-  ) => _hostApi.generateText(session, prompt, config);
-
-  @override
-  Future<void> startStreamingText(
-    String session,
-    String prompt,
-    generated.LocalAiGenerationConfigMessage config,
-  ) => _hostApi.startStreamingText(session, prompt, config);
-
-  @override
-  Future<void> cancelStreamingText(String session) =>
-      _hostApi.cancelStreamingText(session);
-
-  @override
-  Stream<generated.LocalAiStreamChunkMessage> generationStream() =>
-      generated.generationStream();
-}
-
 /// Entry point for checking local AI availability and creating sessions.
 ///
 /// Generation always runs through an [OnDeviceAiSession]. Reusing the same
 /// session is the cross-platform way to preserve native session context when a
 /// platform supports it, such as Apple Foundation Models.
 class OnDeviceAi {
-  OnDeviceAi({OnDeviceAiApi? api}) : _api = api ?? OnDeviceAiHostApiAdapter();
+  OnDeviceAi({
+    generated.OnDeviceAiHostApi? hostApi,
+    Stream<generated.LocalAiStreamChunkMessage> Function()? generationStream,
+  }) : _api = hostApi ?? generated.OnDeviceAiHostApi(),
+       _generationStream = generationStream ?? generated.generationStream;
 
-  final OnDeviceAiApi _api;
+  final generated.OnDeviceAiHostApi _api;
+  final Stream<generated.LocalAiStreamChunkMessage> Function()
+  _generationStream;
 
   /// Returns local AI support for the current platform and model state.
   Future<OnDeviceAiAvailability> availability() async {
@@ -191,7 +123,11 @@ class OnDeviceAi {
   /// stateful model sessions can retain context between calls.
   Future<OnDeviceAiSession> createSession({String? instructions}) async {
     final session = await _api.createSession(instructions ?? '');
-    return OnDeviceAiSession._(api: _api, session: session);
+    return OnDeviceAiSession._(
+      hostApi: _api,
+      generationStream: _generationStream,
+      session: session,
+    );
   }
 }
 
@@ -200,11 +136,18 @@ class OnDeviceAi {
 /// Sessions own platform model state. Dispose a session when the surrounding UI
 /// flow is finished so native resources and any retained context can be freed.
 class OnDeviceAiSession {
-  OnDeviceAiSession._({required OnDeviceAiApi api, required String session})
-    : _api = api,
-      _session = session;
+  OnDeviceAiSession._({
+    required generated.OnDeviceAiHostApi hostApi,
+    required Stream<generated.LocalAiStreamChunkMessage> Function()
+    generationStream,
+    required String session,
+  }) : _api = hostApi,
+       _generationStream = generationStream,
+       _session = session;
 
-  final OnDeviceAiApi _api;
+  final generated.OnDeviceAiHostApi _api;
+  final Stream<generated.LocalAiStreamChunkMessage> Function()
+  _generationStream;
   final String _session;
 
   /// Whether [dispose] has been called.
@@ -267,7 +210,7 @@ class OnDeviceAiSession {
     }
 
     controller.onListen = () {
-      subscription = _api.generationStream().listen(
+      subscription = _generationStream().listen(
         (chunk) {
           if (isClosing) {
             return;

@@ -6,11 +6,14 @@ import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
 import 'package:flutter_native_ai/src/on_device_ai_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+OnDeviceAi _serviceFor(_FakeHostApi api) =>
+    OnDeviceAi(hostApi: api, generationStream: api.generationStream);
+
 void main() {
   group('OnDeviceAi', () {
     test('maps availability responses', () async {
-      final service = OnDeviceAi(
-        api: _FakeLocalAiApi(
+      final service = _serviceFor(
+        _FakeHostApi(
           availabilityResponse: generated.LocalAiAvailabilityMessage(
             isAvailable: true,
             modelStatus: 'available',
@@ -28,8 +31,8 @@ void main() {
     test(
       'returns unsupported availability for missing platform plugin',
       () async {
-        final service = OnDeviceAi(
-          api: _FakeLocalAiApi(availabilityError: MissingPluginException()),
+        final service = _serviceFor(
+          _FakeHostApi(availabilityError: MissingPluginException()),
         );
 
         final availability = await service.availability();
@@ -40,8 +43,8 @@ void main() {
     );
 
     test('maps platform availability errors into unavailable state', () async {
-      final service = OnDeviceAi(
-        api: _FakeLocalAiApi(
+      final service = _serviceFor(
+        _FakeHostApi(
           availabilityError: PlatformException(
             code: 'availability-failed',
             message: 'Model status could not be read.',
@@ -57,8 +60,8 @@ void main() {
     });
 
     test('uses fallback availability message for platform errors', () async {
-      final service = OnDeviceAi(
-        api: _FakeLocalAiApi(
+      final service = _serviceFor(
+        _FakeHostApi(
           availabilityError: PlatformException(code: 'availability-failed'),
         ),
       );
@@ -74,8 +77,8 @@ void main() {
     });
 
     test('creates a session with default empty instructions', () async {
-      final api = _FakeLocalAiApi();
-      final service = OnDeviceAi(api: api);
+      final api = _FakeHostApi();
+      final service = _serviceFor(api);
 
       await service.createSession();
 
@@ -83,8 +86,8 @@ void main() {
     });
 
     test('creates a session with custom instructions', () async {
-      final api = _FakeLocalAiApi();
-      final service = OnDeviceAi(api: api);
+      final api = _FakeHostApi();
+      final service = _serviceFor(api);
 
       await service.createSession(instructions: 'Answer in one sentence.');
 
@@ -94,15 +97,15 @@ void main() {
 
   group('OnDeviceAiSession', () {
     test('maps generation config and response', () async {
-      final api = _FakeLocalAiApi(
+      final api = _FakeHostApi(
         generationResponse: generated.LocalAiGenerationResponseMessage(
           text: 'item is a Grass-type card.',
           tokenCount: 8,
           durationMs: 42,
         ),
       );
-      final session = await OnDeviceAi(
-        api: api,
+      final session = await _serviceFor(
+        api,
       ).createSession(instructions: 'Stay brief.');
 
       final result = await session.generateText(
@@ -124,7 +127,7 @@ void main() {
     });
 
     test('starts generation and maps stream chunks', () async {
-      final api = _FakeLocalAiApi(
+      final api = _FakeHostApi(
         streamChunks: [
           generated.LocalAiStreamChunkMessage(text: 'Fire', isDone: false),
           generated.LocalAiStreamChunkMessage(
@@ -133,7 +136,7 @@ void main() {
           ),
         ],
       );
-      final session = await OnDeviceAi(api: api).createSession();
+      final session = await _serviceFor(api).createSession();
 
       final chunks = await session
           .generateTextStream(
@@ -154,7 +157,7 @@ void main() {
     });
 
     test('cancels the generation stream after a done chunk', () async {
-      final api = _FakeLocalAiApi(
+      final api = _FakeHostApi(
         streamChunks: [
           generated.LocalAiStreamChunkMessage(text: 'Done', isDone: true),
           generated.LocalAiStreamChunkMessage(
@@ -163,7 +166,7 @@ void main() {
           ),
         ],
       );
-      final session = await OnDeviceAi(api: api).createSession();
+      final session = await _serviceFor(api).createSession();
 
       final chunks = await session
           .generateTextStream(prompt: 'Stop after done.')
@@ -174,13 +177,13 @@ void main() {
     });
 
     test('closes the generation stream after a native stream error', () async {
-      final api = _FakeLocalAiApi(
+      final api = _FakeHostApi(
         streamError: PlatformException(
           code: 'stream-error',
           message: 'Stream failed',
         ),
       );
-      final session = await OnDeviceAi(api: api).createSession();
+      final session = await _serviceFor(api).createSession();
 
       await expectLater(
         session.generateTextStream(prompt: 'Fail from stream.').toList(),
@@ -190,7 +193,7 @@ void main() {
     });
 
     test('maps terminal error chunks without throwing', () async {
-      final api = _FakeLocalAiApi(
+      final api = _FakeHostApi(
         streamChunks: [
           generated.LocalAiStreamChunkMessage(
             text: 'Partial text',
@@ -200,7 +203,7 @@ void main() {
           ),
         ],
       );
-      final session = await OnDeviceAi(api: api).createSession();
+      final session = await _serviceFor(api).createSession();
 
       final chunks = await session
           .generateTextStream(prompt: 'Surface native terminal errors.')
@@ -217,13 +220,13 @@ void main() {
     test(
       'closes the generation stream when starting generation fails',
       () async {
-        final api = _FakeLocalAiApi(
+        final api = _FakeHostApi(
           startStreamError: PlatformException(
             code: 'start-error',
             message: 'Start failed',
           ),
         );
-        final session = await OnDeviceAi(api: api).createSession();
+        final session = await _serviceFor(api).createSession();
 
         await expectLater(
           session.generateTextStream(prompt: 'Fail to start.').toList(),
@@ -236,13 +239,13 @@ void main() {
     test(
       'cancels native generation when stream subscription is cancelled',
       () async {
-        final api = _FakeLocalAiApi(
+        final api = _FakeHostApi(
           streamChunks: [
             generated.LocalAiStreamChunkMessage(text: 'First', isDone: false),
             generated.LocalAiStreamChunkMessage(text: 'Second', isDone: false),
           ],
         );
-        final session = await OnDeviceAi(api: api).createSession();
+        final session = await _serviceFor(api).createSession();
 
         late final StreamSubscription<OnDeviceAiStreamChunk> subscription;
         final firstChunk = Completer<void>();
@@ -263,8 +266,8 @@ void main() {
     );
 
     test('forwards explicit stream cancellation', () async {
-      final api = _FakeLocalAiApi();
-      final session = await OnDeviceAi(api: api).createSession();
+      final api = _FakeHostApi();
+      final session = await _serviceFor(api).createSession();
 
       await session.cancelStreamingText();
 
@@ -272,8 +275,8 @@ void main() {
     });
 
     test('disposes native session once', () async {
-      final api = _FakeLocalAiApi();
-      final session = await OnDeviceAi(api: api).createSession();
+      final api = _FakeHostApi();
+      final session = await _serviceFor(api).createSession();
 
       await session.dispose();
       await session.dispose();
@@ -283,7 +286,7 @@ void main() {
     });
 
     test('throws when used after disposal', () async {
-      final session = await OnDeviceAi(api: _FakeLocalAiApi()).createSession();
+      final session = await _serviceFor(_FakeHostApi()).createSession();
 
       await session.dispose();
 
@@ -300,8 +303,8 @@ void main() {
   });
 }
 
-class _FakeLocalAiApi implements OnDeviceAiApi {
-  _FakeLocalAiApi({
+class _FakeHostApi extends generated.OnDeviceAiHostApi {
+  _FakeHostApi({
     this.availabilityResponse,
     this.availabilityError,
     this.generationResponse,
@@ -386,7 +389,6 @@ class _FakeLocalAiApi implements OnDeviceAiApi {
     cancelledStreamSession = session;
   }
 
-  @override
   Stream<generated.LocalAiStreamChunkMessage> generationStream() {
     final controller = StreamController<generated.LocalAiStreamChunkMessage>()
       ..onCancel = () {

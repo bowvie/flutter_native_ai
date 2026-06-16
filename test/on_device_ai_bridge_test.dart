@@ -1,7 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
     as generated;
-import 'package:flutter_native_ai/src/on_device_ai_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -81,9 +80,8 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
-      final availability = await adapter.availability();
+      final availability = await hostApi.availability();
 
       expect(availability.isAvailable, isTrue);
       expect(availability.modelStatus, 'available');
@@ -114,10 +112,9 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
-      final session = await adapter.createSession('Keep answers short.');
-      await adapter.disposeSession(session);
+      final session = await hostApi.createSession('Keep answers short.');
+      await hostApi.disposeSession(session);
 
       expect(session, 'session-1');
       expect(calls.map((call) => call.channelName), [
@@ -150,9 +147,8 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
-      final response = await adapter.generateText(
+      final response = await hostApi.generateText(
         'session-1',
         'Summarize privately.',
         generated.LocalAiGenerationConfigMessage(
@@ -178,10 +174,9 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
       await expectLater(
-        adapter.generateText(
+        hostApi.generateText(
           'session-1',
           'Hello',
           generated.LocalAiGenerationConfigMessage(),
@@ -200,10 +195,9 @@ void main() {
         binaryMessenger: messenger,
         messageChannelSuffix: suffix,
       );
-      final adapter = OnDeviceAiHostApiAdapter(hostApi: hostApi);
 
       await expectLater(
-        adapter.availability(),
+        hostApi.availability(),
         throwsA(
           isA<PlatformException>()
               .having((error) => error.code, 'code', 'channel-error')
