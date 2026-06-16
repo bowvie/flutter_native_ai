@@ -252,9 +252,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
           var latestText = ""
 
           for try await snapshot in stream {
-            if Task.isCancelled {
-              return
-            }
+            try Task.checkCancellation()
 
             latestText = snapshot.content
             await MainActor.run {

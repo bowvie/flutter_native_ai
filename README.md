@@ -13,7 +13,7 @@ updates.
 | Platform | Minimum app target | Native model requirement | Runtime behavior |
 | --- | --- | --- | --- |
 | iOS | iOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on older iOS versions; `availability()` returns unavailable when Foundation Models are not present |
-| macOS | macOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on older macOS versions; `availability()` returns unavailable when Foundation Models are not present |
+| macOS | macOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on macOS 13.0+; `availability()` returns unavailable when Foundation Models are not present |
 | Android | minSdk 26 | Gemini Nano through ML Kit Prompt API / AICore on supported devices | Installs on Android 8.0+; `availability()` returns unavailable unless the native model is available |
 | Other platforms | Not supported | None | Returns unsupported availability |
 
