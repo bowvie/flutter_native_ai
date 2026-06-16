@@ -2,7 +2,7 @@
 
 A Flutter plugin for private, on-device text generation using native platform AI
 models. It gives Flutter apps one small Dart API over Apple Foundation Models on
-Apple platforms and Gemini Nano through ML Kit Prompt API / AICore on Android.
+Apple platforms and Gemini Nano through ML Kit Prompt API on Android.
 
 The package exposes one Dart API for checking availability, initializing a local
 model session, generating a complete response, and streaming cumulative text
@@ -14,7 +14,7 @@ updates.
 | --- | --- | --- | --- |
 | iOS | iOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on older iOS versions; `availability()` returns unavailable when Foundation Models are not present |
 | macOS | macOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on macOS 13.0+; `availability()` returns unavailable when Foundation Models are not present |
-| Android | minSdk 26 | Gemini Nano through ML Kit Prompt API / AICore on supported devices | Installs on Android 8.0+; `availability()` returns unavailable unless the native model is available |
+| Android | minSdk 26 | Gemini Nano through ML Kit Prompt API on supported devices | Installs on Android 8.0+; `availability()` returns unavailable unless the native model is available |
 | Other platforms | Not supported | None | Returns unsupported availability |
 
 This package does not send prompts or generated text to a server. Generation is
@@ -120,12 +120,12 @@ Manager.
 
 The iOS and macOS implementations share one Darwin source package under
 `darwin/flutter_native_ai`. Flutter apps can consume it through Swift Package
-Manager or CocoaPods. The bundled macOS example uses Swift Package Manager and
-does not include CocoaPods integration.
+Manager or CocoaPods. Both bundled Apple example runners use Swift Package
+Manager; the macOS example does not include CocoaPods integration.
 
-Pigeon currently emits `open fun` modifiers in a generated Kotlin interface.
-Those are removed in the checked-in generated Kotlin binding because Kotlin
-interface members are overridable by default.
+Pigeon currently emits `open fun` modifiers in the generated Kotlin event-channel
+wrapper. Those are removed in the checked-in generated Kotlin binding because
+the local lint configuration rejects them.
 
 ## AI-Assisted Development
 
@@ -136,6 +136,6 @@ implementation process; the package is not vibe-coded.
 
 ## Notes
 
-This package is an early alpha. Apple Foundation Models and Gemini Nano APIs are
-new and may change. The Dart API is intentionally small so platform-specific
-changes can be handled behind the plugin boundary.
+This package is pre-1.0. Apple Foundation Models and Gemini Nano APIs are new and
+may change. The Dart API is intentionally small so platform-specific changes can
+be handled behind the plugin boundary.
