@@ -291,10 +291,7 @@ void main() {
       );
       final session = await _serviceFor(api).createSession();
 
-      await expectLater(
-        session.dispose(),
-        throwsA(isA<PlatformException>()),
-      );
+      await expectLater(session.dispose(), throwsA(isA<PlatformException>()));
       expect(session.isDisposed, isFalse);
 
       api.disposeError = null;
