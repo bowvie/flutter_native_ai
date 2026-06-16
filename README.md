@@ -13,7 +13,7 @@ updates.
 | Platform | Minimum app target | Native model requirement | Runtime behavior |
 | --- | --- | --- | --- |
 | iOS | iOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on older iOS versions; `availability()` returns unavailable when Foundation Models are not present |
-| macOS | Not implemented yet | Apple Foundation Models on supported OS/device combinations | Planned; currently unsupported |
+| macOS | macOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on macOS 13.0+; `availability()` returns unavailable when Foundation Models are not present |
 | Android | minSdk 26 | Gemini Nano through ML Kit Prompt API / AICore on supported devices | Installs on Android 8.0+; `availability()` returns unavailable unless the native model is available |
 | Other platforms | Not supported | None | Returns unsupported availability |
 
@@ -82,7 +82,8 @@ the local model is present.
 The minimum app target only describes where the plugin can be installed. It does
 not guarantee that native AI is available. For example, iOS versions below the
 Foundation Models runtime still work as app targets, but this package reports
-the model as unavailable.
+the model as unavailable. Foundation Models currently requires iOS 26.0 or
+macOS 26.0 or later at runtime.
 
 Android currently reports `downloadable` and `downloading` states as unavailable.
 The package does not start model downloads automatically.

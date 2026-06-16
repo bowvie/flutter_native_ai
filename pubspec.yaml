@@ -28,3 +28,5 @@ flutter:
         pluginClass: FlutterNativeAiPlugin
       ios:
         pluginClass: FlutterNativeAiPlugin
+      macos:
+        pluginClass: FlutterNativeAiPlugin

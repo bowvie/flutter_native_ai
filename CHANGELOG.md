@@ -1,3 +1,9 @@
+## Unreleased
+
+- Adds macOS plugin registration and an example macOS runner.
+- Reuses the Apple Foundation Models bridge on macOS with runtime availability
+    checks for macOS 26.0 or later.
+
 ## 0.1.1
 
 iOS hotfix release.
