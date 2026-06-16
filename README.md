@@ -118,6 +118,18 @@ dart run pigeon --input pigeons/on_device_ai.dart
 dart format lib/src/generated/on_device_ai.g.dart pigeons/on_device_ai.dart
 ```
 
+The generated Swift binding is written to
+`darwin/flutter_native_ai/Sources/flutter_native_ai/OnDeviceAi.g.swift` so the
+same Apple implementation can be used by both CocoaPods and Swift Package
+Manager.
+
+## Apple Package Managers
+
+The iOS and macOS implementations share one Darwin source package under
+`darwin/flutter_native_ai`. Flutter apps can consume it through Swift Package
+Manager or CocoaPods. The bundled macOS example uses Swift Package Manager and
+does not include CocoaPods integration.
+
 Pigeon currently emits `open fun` modifiers in a generated Kotlin interface.
 Those are removed in the checked-in generated Kotlin binding because Kotlin
 interface members are overridable by default.

@@ -12,3 +12,8 @@ flutter run
 ```
 
 Simulators and older OS versions usually report the model as unavailable.
+
+The iOS and macOS example runners are configured for Flutter's Swift Package
+Manager integration. The macOS runner intentionally does not include a Podfile or
+CocoaPods workspace integration. Android uses `minSdk 26` to match the plugin's
+native dependency requirements.

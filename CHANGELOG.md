@@ -3,6 +3,9 @@
 - Adds macOS plugin registration and an example macOS runner.
 - Reuses the Apple Foundation Models bridge on macOS with runtime availability
     checks for macOS 26.0 or later.
+- Adds Swift Package Manager support for the shared iOS/macOS implementation.
+- Uses Swift Package Manager for both Apple example runners, including removing
+    CocoaPods integration from the macOS runner.
 
 ## 0.1.1
 

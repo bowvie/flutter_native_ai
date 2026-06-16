@@ -12,7 +12,7 @@ import 'package:pigeon/pigeon.dart';
         'android/src/main/kotlin/com/bowvie/flutter_native_ai/OnDeviceAi.g.kt',
     kotlinOptions: KotlinOptions(package: 'com.bowvie.flutter_native_ai'),
     swiftOut:
-        'ios/flutter_native_ai/Sources/flutter_native_ai/OnDeviceAi.g.swift',
+        'darwin/flutter_native_ai/Sources/flutter_native_ai/OnDeviceAi.g.swift',
     swiftOptions: SwiftOptions(),
     dartPackageName: 'flutter_native_ai',
   ),

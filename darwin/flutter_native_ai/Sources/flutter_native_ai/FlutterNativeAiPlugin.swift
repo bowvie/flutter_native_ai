@@ -9,10 +9,16 @@ public class FlutterNativeAiPlugin: NSObject, FlutterPlugin {
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let instance = FlutterNativeAiPlugin()
+    #if os(iOS)
+      let messenger = registrar.messenger()
+    #elseif os(macOS)
+      let messenger = registrar.messenger
+    #endif
+
     OnDeviceAiHostApiSetup.setUp(
-      binaryMessenger: registrar.messenger(),
+      binaryMessenger: messenger,
       api: instance.bridge
     )
-    instance.bridge.registerStreamHandler(with: registrar.messenger())
+    instance.bridge.registerStreamHandler(with: messenger)
   }
 }
