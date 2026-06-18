@@ -10,11 +10,16 @@ void main() {
     test('round-trips all local AI message types', () {
       final codec = generated.OnDeviceAiHostApi.pigeonChannelCodec;
       final messages = <Object?>[
-        generated.LocalAiAvailabilityMessage(
-          isAvailable: false,
+        generated.LocalAiStatusMessage(
+          isSupported: true,
+          isReady: false,
+          canInitialize: true,
+          isInitializing: true,
+          initializationProgress: 25,
           reason: 'Needs model download.',
-          modelStatus: 'downloadable',
+          platformStatus: 'downloadable',
         ),
+        generated.LocalAiInitializationPolicyMessage.whenNeeded,
         generated.LocalAiGenerationConfigMessage(
           maxTokens: 128,
           temperature: 0.35,
@@ -68,11 +73,14 @@ void main() {
     });
 
     test('uses suffixed channels and maps host replies', () async {
-      _setHostHandler(messenger, 'availability', suffix, calls, (_) async {
+      _setHostHandler(messenger, 'status', suffix, calls, (_) async {
         return <Object?>[
-          generated.LocalAiAvailabilityMessage(
-            isAvailable: true,
-            modelStatus: 'available',
+          generated.LocalAiStatusMessage(
+            isSupported: true,
+            isReady: true,
+            canInitialize: false,
+            isInitializing: false,
+            platformStatus: 'available',
           ),
         ];
       });
@@ -81,12 +89,47 @@ void main() {
         messageChannelSuffix: suffix,
       );
 
-      final availability = await hostApi.availability();
+      final status = await hostApi.status();
 
-      expect(availability.isAvailable, isTrue);
-      expect(availability.modelStatus, 'available');
-      expect(calls.single.channelName, _hostChannel('availability', suffix));
+      expect(status.isSupported, isTrue);
+      expect(status.isReady, isTrue);
+      expect(status.platformStatus, 'available');
+      expect(calls.single.channelName, _hostChannel('status', suffix));
       expect(calls.single.message, isNull);
+    });
+
+    test('sends initialization policy over the bridge', () async {
+      _setHostHandler(messenger, 'ensureReady', suffix, calls, (message) async {
+        final args = message! as List<Object?>;
+
+        expect(
+          args.single,
+          generated.LocalAiInitializationPolicyMessage.whenNeeded,
+        );
+
+        return <Object?>[
+          generated.LocalAiStatusMessage(
+            isSupported: true,
+            isReady: true,
+            canInitialize: false,
+            isInitializing: false,
+            initializationProgress: 100,
+            platformStatus: 'available',
+          ),
+        ];
+      });
+      final hostApi = generated.OnDeviceAiHostApi(
+        binaryMessenger: messenger,
+        messageChannelSuffix: suffix,
+      );
+
+      final status = await hostApi.ensureReady(
+        generated.LocalAiInitializationPolicyMessage.whenNeeded,
+      );
+
+      expect(status.isReady, isTrue);
+      expect(status.initializationProgress, 100);
+      expect(calls.single.channelName, _hostChannel('ensureReady', suffix));
     });
 
     test('creates and disposes native sessions over the bridge', () async {
@@ -197,14 +240,14 @@ void main() {
       );
 
       await expectLater(
-        hostApi.availability(),
+        hostApi.status(),
         throwsA(
           isA<PlatformException>()
               .having((error) => error.code, 'code', 'channel-error')
               .having(
                 (error) => error.message,
                 'message',
-                contains(_hostChannel('availability', suffix)),
+                contains(_hostChannel('status', suffix)),
               ),
         ),
       );
@@ -260,10 +303,68 @@ void main() {
       expect(chunks.single.isDone, isFalse);
     });
   });
+
+  group('status stream bridge', () {
+    late TestDefaultBinaryMessenger messenger;
+    const instanceName = 'hardeningStatusStream';
+    const channelName =
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiStreamApi.statusStream.$instanceName';
+
+    setUp(() {
+      messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    });
+
+    tearDown(() {
+      messenger.setMockMethodCallHandler(
+        MethodChannel(channelName, generated.pigeonMethodCodec),
+        null,
+      );
+    });
+
+    test('decodes native status events', () async {
+      final methodCalls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(
+        MethodChannel(channelName, generated.pigeonMethodCodec),
+        (call) async {
+          methodCalls.add(call);
+          return null;
+        },
+      );
+
+      final statusesFuture = generated
+          .statusStream(instanceName: instanceName)
+          .take(1)
+          .toList();
+      await pumpEventQueue();
+
+      await messenger.handlePlatformMessage(
+        channelName,
+        generated.pigeonMethodCodec.encodeSuccessEnvelope(
+          generated.LocalAiStatusMessage(
+            isSupported: true,
+            isReady: false,
+            canInitialize: true,
+            isInitializing: true,
+            initializationProgress: 50,
+            platformStatus: 'downloading',
+          ),
+        ),
+        (_) {},
+      );
+
+      final statuses = await statusesFuture;
+
+      expect(methodCalls.map((call) => call.method), ['listen', 'cancel']);
+      expect(statuses.single.isInitializing, isTrue);
+      expect(statuses.single.initializationProgress, 50);
+    });
+  });
 }
 
 const _hostMethods = <String>[
-  'availability',
+  'status',
+  'ensureReady',
   'createSession',
   'disposeSession',
   'generateText',

@@ -22,13 +22,11 @@ final class PigeonError: Error {
     self.message = message
     self.details = details
   }
-
   var localizedDescription: String {
     return
       "PigeonError(code: \(code), message: \(message ?? "<nil>"), details: \(details ?? "<nil>")"
   }
 }
-
 private func wrapResult(_ result: Any?) -> [Any?] {
   return [result]
 }
@@ -184,53 +182,87 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
 }
 
 
-/// Availability state returned by the native local AI bridge.
+/// Policy controlling whether readiness methods may initialize the model.
+enum LocalAiInitializationPolicyMessage: Int, CaseIterable {
+  /// Only check current status; never start model initialization.
+  case never = 0
+  /// Initialize only when the model is supported but not ready.
+  case whenNeeded = 1
+  /// Ask the platform to initialize or refresh readiness before proceeding.
+  case always = 2
+}
+
+/// Current local AI support and model readiness state.
 ///
 /// Generated class from Pigeon that represents data sent in messages.
-struct LocalAiAvailabilityMessage: Hashable, CustomStringConvertible {
-  /// Whether generation can run on this host.
-  var isAvailable: Bool
-  /// Human-readable unavailable reason.
+struct LocalAiStatusMessage: Hashable, CustomStringConvertible {
+  /// Whether this platform, OS, and device can support local AI.
+  var isSupported: Bool
+  /// Whether generation can run now.
+  var isReady: Bool
+  /// Whether the native platform can initialize or download the model.
+  var canInitialize: Bool
+  /// Whether model initialization or download is currently running.
+  var isInitializing: Bool
+  /// Real initialization progress from 0 to 100, when the platform provides it.
+  var initializationProgress: Int64? = nil
+  /// Human-readable unavailable or initialization failure reason.
   var reason: String? = nil
   /// Raw platform model status for diagnostics.
-  var modelStatus: String? = nil
+  var platformStatus: String? = nil
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
-  static func fromList(_ pigeonVar_list: [Any?]) -> LocalAiAvailabilityMessage? {
-    let isAvailable = pigeonVar_list[0] as! Bool
-    let reason: String? = nilOrValue(pigeonVar_list[1])
-    let modelStatus: String? = nilOrValue(pigeonVar_list[2])
+  static func fromList(_ pigeonVar_list: [Any?]) -> LocalAiStatusMessage? {
+    let isSupported = pigeonVar_list[0] as! Bool
+    let isReady = pigeonVar_list[1] as! Bool
+    let canInitialize = pigeonVar_list[2] as! Bool
+    let isInitializing = pigeonVar_list[3] as! Bool
+    let initializationProgress: Int64? = nilOrValue(pigeonVar_list[4])
+    let reason: String? = nilOrValue(pigeonVar_list[5])
+    let platformStatus: String? = nilOrValue(pigeonVar_list[6])
 
-    return LocalAiAvailabilityMessage(
-      isAvailable: isAvailable,
+    return LocalAiStatusMessage(
+      isSupported: isSupported,
+      isReady: isReady,
+      canInitialize: canInitialize,
+      isInitializing: isInitializing,
+      initializationProgress: initializationProgress,
       reason: reason,
-      modelStatus: modelStatus
+      platformStatus: platformStatus
     )
   }
   func toList() -> [Any?] {
     return [
-      isAvailable,
+      isSupported,
+      isReady,
+      canInitialize,
+      isInitializing,
+      initializationProgress,
       reason,
-      modelStatus,
+      platformStatus,
     ]
   }
-  static func == (lhs: LocalAiAvailabilityMessage, rhs: LocalAiAvailabilityMessage) -> Bool {
+  static func == (lhs: LocalAiStatusMessage, rhs: LocalAiStatusMessage) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return OnDeviceAiPigeonInternal.deepEquals(lhs.isAvailable, rhs.isAvailable) && OnDeviceAiPigeonInternal.deepEquals(lhs.reason, rhs.reason) && OnDeviceAiPigeonInternal.deepEquals(lhs.modelStatus, rhs.modelStatus)
+    return OnDeviceAiPigeonInternal.deepEquals(lhs.isSupported, rhs.isSupported) && OnDeviceAiPigeonInternal.deepEquals(lhs.isReady, rhs.isReady) && OnDeviceAiPigeonInternal.deepEquals(lhs.canInitialize, rhs.canInitialize) && OnDeviceAiPigeonInternal.deepEquals(lhs.isInitializing, rhs.isInitializing) && OnDeviceAiPigeonInternal.deepEquals(lhs.initializationProgress, rhs.initializationProgress) && OnDeviceAiPigeonInternal.deepEquals(lhs.reason, rhs.reason) && OnDeviceAiPigeonInternal.deepEquals(lhs.platformStatus, rhs.platformStatus)
   }
 
   func hash(into hasher: inout Hasher) {
-    hasher.combine("LocalAiAvailabilityMessage")
-    OnDeviceAiPigeonInternal.deepHash(value: isAvailable, hasher: &hasher)
+    hasher.combine("LocalAiStatusMessage")
+    OnDeviceAiPigeonInternal.deepHash(value: isSupported, hasher: &hasher)
+    OnDeviceAiPigeonInternal.deepHash(value: isReady, hasher: &hasher)
+    OnDeviceAiPigeonInternal.deepHash(value: canInitialize, hasher: &hasher)
+    OnDeviceAiPigeonInternal.deepHash(value: isInitializing, hasher: &hasher)
+    OnDeviceAiPigeonInternal.deepHash(value: initializationProgress, hasher: &hasher)
     OnDeviceAiPigeonInternal.deepHash(value: reason, hasher: &hasher)
-    OnDeviceAiPigeonInternal.deepHash(value: modelStatus, hasher: &hasher)
+    OnDeviceAiPigeonInternal.deepHash(value: platformStatus, hasher: &hasher)
   }
 
   public var description: String {
-    return "LocalAiAvailabilityMessage(isAvailable: \(String(describing: isAvailable)), reason: \(String(describing: reason)), modelStatus: \(String(describing: modelStatus)))"
+    return "LocalAiStatusMessage(isSupported: \(String(describing: isSupported)), isReady: \(String(describing: isReady)), canInitialize: \(String(describing: canInitialize)), isInitializing: \(String(describing: isInitializing)), initializationProgress: \(String(describing: initializationProgress)), reason: \(String(describing: reason)), platformStatus: \(String(describing: platformStatus)))"
   }
 }
 
@@ -388,12 +420,18 @@ private class OnDeviceAiPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
     case 129:
-      return LocalAiAvailabilityMessage.fromList(self.readValue() as! [Any?])
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return LocalAiInitializationPolicyMessage(rawValue: enumResultAsInt)
+      }
+      return nil
     case 130:
-      return LocalAiGenerationConfigMessage.fromList(self.readValue() as! [Any?])
+      return LocalAiStatusMessage.fromList(self.readValue() as! [Any?])
     case 131:
-      return LocalAiGenerationResponseMessage.fromList(self.readValue() as! [Any?])
+      return LocalAiGenerationConfigMessage.fromList(self.readValue() as! [Any?])
     case 132:
+      return LocalAiGenerationResponseMessage.fromList(self.readValue() as! [Any?])
+    case 133:
       return LocalAiStreamChunkMessage.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
@@ -403,17 +441,20 @@ private class OnDeviceAiPigeonCodecReader: FlutterStandardReader {
 
 private class OnDeviceAiPigeonCodecWriter: FlutterStandardWriter {
   override func writeValue(_ value: Any) {
-    if let value = value as? LocalAiAvailabilityMessage {
+    if let value = value as? LocalAiInitializationPolicyMessage {
       super.writeByte(129)
-      super.writeValue(value.toList())
-    } else if let value = value as? LocalAiGenerationConfigMessage {
+      super.writeValue(value.rawValue)
+    } else if let value = value as? LocalAiStatusMessage {
       super.writeByte(130)
       super.writeValue(value.toList())
-    } else if let value = value as? LocalAiGenerationResponseMessage {
+    } else if let value = value as? LocalAiGenerationConfigMessage {
       super.writeByte(131)
       super.writeValue(value.toList())
-    } else if let value = value as? LocalAiStreamChunkMessage {
+    } else if let value = value as? LocalAiGenerationResponseMessage {
       super.writeByte(132)
+      super.writeValue(value.toList())
+    } else if let value = value as? LocalAiStreamChunkMessage {
+      super.writeByte(133)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -442,8 +483,10 @@ var onDeviceAiPigeonMethodCodec = FlutterStandardMethodCodec(readerWriter: OnDev
 ///
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
 protocol OnDeviceAiHostApi {
-  /// Checks whether the current device and OS can run local AI.
-  func availability(completion: @escaping (Result<LocalAiAvailabilityMessage, Error>) -> Void)
+  /// Checks the current device, OS, and model readiness.
+  func status(completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void)
+  /// Ensures the native model is ready according to [policy].
+  func ensureReady(policy: LocalAiInitializationPolicyMessage, completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void)
   /// Creates a native model session.
   func createSession(instructions: String, completion: @escaping (Result<String, Error>) -> Void)
   /// Releases the native resources associated with [session].
@@ -462,11 +505,11 @@ class OnDeviceAiHostApiSetup {
   /// Sets up an instance of `OnDeviceAiHostApi` to handle messages through the `binaryMessenger`.
   static func setUp(binaryMessenger: FlutterBinaryMessenger, api: OnDeviceAiHostApi?, messageChannelSuffix: String = "") {
     let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
-    /// Checks whether the current device and OS can run local AI.
-    let availabilityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.availability\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    /// Checks the current device, OS, and model readiness.
+    let statusChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.status\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      availabilityChannel.setMessageHandler { _, reply in
-        api.availability { result in
+      statusChannel.setMessageHandler { _, reply in
+        api.status { result in
           switch result {
           case .success(let res):
             reply(wrapResult(res))
@@ -476,7 +519,25 @@ class OnDeviceAiHostApiSetup {
         }
       }
     } else {
-      availabilityChannel.setMessageHandler(nil)
+      statusChannel.setMessageHandler(nil)
+    }
+    /// Ensures the native model is ready according to [policy].
+    let ensureReadyChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.ensureReady\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      ensureReadyChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let policyArg = args[0] as! LocalAiInitializationPolicyMessage
+        api.ensureReady(policy: policyArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      ensureReadyChannel.setMessageHandler(nil)
     }
     /// Creates a native model session.
     let createSessionChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.createSession\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
@@ -639,3 +700,16 @@ class GenerationStreamStreamHandler: PigeonEventChannelWrapper<LocalAiStreamChun
   }
 }
       
+class StatusStreamStreamHandler: PigeonEventChannelWrapper<LocalAiStatusMessage> {
+  static func register(with messenger: FlutterBinaryMessenger,
+                      instanceName: String = "",
+                      streamHandler: StatusStreamStreamHandler) {
+    var channelName = "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiStreamApi.statusStream"
+    if !instanceName.isEmpty {
+      channelName += ".\(instanceName)"
+    }
+    let internalStreamHandler = PigeonStreamHandler<LocalAiStatusMessage>(wrapper: streamHandler)
+    let channel = FlutterEventChannel(name: channelName, binaryMessenger: messenger, codec: onDeviceAiPigeonMethodCodec)
+    channel.setStreamHandler(internalStreamHandler)
+  }
+}

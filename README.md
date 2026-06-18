@@ -4,18 +4,18 @@ A Flutter plugin for private, on-device text generation using native platform AI
 models. It gives Flutter apps one small Dart API over Apple Foundation Models on
 Apple platforms and Gemini Nano through ML Kit Prompt API on Android.
 
-The package exposes one Dart API for checking availability, creating a local
-model session, generating a complete response, and streaming cumulative text
-updates.
+The package exposes one Dart API for checking status, optionally initializing a
+local model, creating a local model session, generating a complete response, and
+streaming cumulative text updates.
 
 ## Platform Support
 
 | Platform | Minimum app target | Native model requirement | Runtime behavior |
 | --- | --- | --- | --- |
-| iOS | iOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on older iOS versions; `availability()` returns unavailable when Foundation Models are not present |
-| macOS | macOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on macOS 13.0+; `availability()` returns unavailable when Foundation Models are not present |
-| Android | minSdk 26 | Gemini Nano through ML Kit Prompt API on supported devices | Installs on Android 8.0+; `availability()` returns unavailable unless the native model is available |
-| Other platforms | Not supported | None | Returns unsupported availability |
+| iOS | iOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on older iOS versions; `status()` reports unsupported/not ready when Foundation Models are not present |
+| macOS | macOS 13.0 | Apple Foundation Models on supported OS/device combinations | Installs on macOS 13.0+; `status()` reports unsupported/not ready when Foundation Models are not present |
+| Android | minSdk 26 | Gemini Nano through ML Kit Prompt API on supported devices | Installs on Android 8.0+; `status()` reports readiness and whether the model can be initialized/downloaded |
+| Other platforms | Not supported | None | Returns unsupported status |
 
 This package does not send prompts or generated text to a server. Generation is
 performed by native on-device model APIs when those APIs are available.
@@ -32,9 +32,9 @@ import 'package:flutter_native_ai/flutter_native_ai.dart';
 
 final ai = OnDeviceAi();
 
-final availability = await ai.availability();
-if (!availability.isAvailable) {
-  print(availability.reason);
+final status = await ai.status();
+if (!status.isAvailable) {
+  print(status.reason);
   return;
 }
 
@@ -78,20 +78,92 @@ Only one streaming generation should be active at a time for a plugin instance.
 Reuse the same `OnDeviceAiSession` for related prompts when you want native
 session context to be retained. Dispose the session when that flow is finished.
 
-## Availability
+## Status and model initialization
 
-Always call `availability()` before creating a session. Native model
-availability depends on the OS, device, regional/account settings, and whether
-the local model is present.
+Always call `status()` before creating a session. Native model readiness depends
+on the OS, device, regional/account settings, and whether the local model is
+present.
 
 The minimum app target only describes where the plugin can be installed. It does
 not guarantee that native AI is available. For example, iOS versions below the
 Foundation Models runtime still work as app targets, but this package reports
-the model as unavailable. Foundation Models currently requires iOS 26.0 or
-macOS 26.0 or later at runtime.
+the model as unsupported/not ready. Foundation Models currently requires iOS 26.0
+or macOS 26.0 or later at runtime.
 
-Android currently reports `downloadable` and `downloading` states as unavailable.
-The package does not start model downloads automatically.
+`OnDeviceAiStatus` separates support from readiness:
+
+- `isSupported`: the platform/device/OS can support local AI.
+- `isReady`: generation can run now.
+- `isAvailable`: convenience getter for `isSupported && isReady`.
+- `canInitialize`: the platform can attempt to make the model ready.
+- `isInitializing`: initialization/download is currently running.
+- `initializationProgress`: nullable `0..100` progress, only when the platform
+  reports real progress.
+- `platformStatus`: raw native status for diagnostics.
+
+Android can report a supported model as not ready when Gemini Nano is
+downloadable. The package never invents progress values. On Android it computes
+`initializationProgress` only from ML Kit download byte counts; if progress is
+not available, the value stays `null`.
+
+### Flow 1: explicit status gate
+
+Use this when your app wants to decide where and when to initialize the model
+(for example, behind a user action or on a dedicated setup screen).
+
+```dart
+final status = await ai.status();
+if (status.isAvailable) {
+  // Create a session.
+} else if (status.canInitialize) {
+  // Show a "Download model" or "Prepare AI" action.
+} else {
+  // Show status.reason or disable local AI.
+}
+```
+
+### Flow 2: startup or setup initialization
+
+Use this when your app has a setup step and wants the model ready before the
+user enters an AI-powered flow.
+
+```dart
+final status = await ai.ensureReady();
+if (!status.isAvailable) {
+  print(status.reason);
+  return;
+}
+```
+
+To show real initialization progress, subscribe before calling `ensureReady()`:
+
+```dart
+final subscription = ai.statusStream().listen((status) {
+  final progress = status.initializationProgress;
+  if (status.isInitializing && progress != null) {
+    print('Initializing local model: $progress%');
+  }
+});
+
+try {
+  await ai.ensureReady();
+} finally {
+  await subscription.cancel();
+}
+```
+
+### Flow 3: just-in-time initialization during session creation
+
+Use this when you want the smallest app code and are comfortable initializing the
+model at the moment a session is needed. The default remains safe:
+`createSession()` does not initialize or download unless you opt in.
+
+```dart
+final session = await ai.createSession(
+  instructions: 'You are a concise assistant.',
+  initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded,
+);
+```
 
 ## API
 
@@ -101,15 +173,18 @@ Main entry point:
 
 Models:
 
-- `OnDeviceAiAvailability`
 - `OnDeviceAiGenerationConfig`
 - `OnDeviceAiGenerationResult`
+- `OnDeviceAiInitializationPolicy`
+- `OnDeviceAiStatus`
 - `OnDeviceAiStreamChunk`
 
 Methods:
 
-- `availability()`
-- `createSession({String? instructions})`
+- `status()`
+- `ensureReady({OnDeviceAiInitializationPolicy policy})`
+- `statusStream()`
+- `createSession({String? instructions, OnDeviceAiInitializationPolicy initializationPolicy})`
 
 Session methods:
 

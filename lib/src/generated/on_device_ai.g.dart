@@ -97,53 +97,96 @@ int _deepHash(Object? value) {
   return value.hashCode;
 }
 
-/// Availability state returned by the native local AI bridge.
-class LocalAiAvailabilityMessage {
-  LocalAiAvailabilityMessage({
-    required this.isAvailable,
+/// Policy controlling whether readiness methods may initialize the model.
+enum LocalAiInitializationPolicyMessage {
+  /// Only check current status; never start model initialization.
+  never,
+
+  /// Initialize only when the model is supported but not ready.
+  whenNeeded,
+
+  /// Ask the platform to initialize or refresh readiness before proceeding.
+  always,
+}
+
+/// Current local AI support and model readiness state.
+class LocalAiStatusMessage {
+  LocalAiStatusMessage({
+    required this.isSupported,
+    required this.isReady,
+    required this.canInitialize,
+    required this.isInitializing,
+    this.initializationProgress,
     this.reason,
-    this.modelStatus,
+    this.platformStatus,
   });
 
-  /// Whether generation can run on this host.
-  bool isAvailable;
+  /// Whether this platform, OS, and device can support local AI.
+  bool isSupported;
 
-  /// Human-readable unavailable reason.
+  /// Whether generation can run now.
+  bool isReady;
+
+  /// Whether the native platform can initialize or download the model.
+  bool canInitialize;
+
+  /// Whether model initialization or download is currently running.
+  bool isInitializing;
+
+  /// Real initialization progress from 0 to 100, when the platform provides it.
+  int? initializationProgress;
+
+  /// Human-readable unavailable or initialization failure reason.
   String? reason;
 
   /// Raw platform model status for diagnostics.
-  String? modelStatus;
+  String? platformStatus;
 
   List<Object?> _toList() {
-    return <Object?>[isAvailable, reason, modelStatus];
+    return <Object?>[
+      isSupported,
+      isReady,
+      canInitialize,
+      isInitializing,
+      initializationProgress,
+      reason,
+      platformStatus,
+    ];
   }
 
   Object encode() {
     return _toList();
   }
 
-  static LocalAiAvailabilityMessage decode(Object result) {
+  static LocalAiStatusMessage decode(Object result) {
     result as List<Object?>;
-    return LocalAiAvailabilityMessage(
-      isAvailable: result[0]! as bool,
-      reason: result[1] as String?,
-      modelStatus: result[2] as String?,
+    return LocalAiStatusMessage(
+      isSupported: result[0]! as bool,
+      isReady: result[1]! as bool,
+      canInitialize: result[2]! as bool,
+      isInitializing: result[3]! as bool,
+      initializationProgress: result[4] as int?,
+      reason: result[5] as String?,
+      platformStatus: result[6] as String?,
     );
   }
 
   @override
   // ignore: avoid_equals_and_hash_code_on_mutable_classes
   bool operator ==(Object other) {
-    if (other is! LocalAiAvailabilityMessage ||
-        other.runtimeType != runtimeType) {
+    if (other is! LocalAiStatusMessage || other.runtimeType != runtimeType) {
       return false;
     }
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(isAvailable, other.isAvailable) &&
+    return _deepEquals(isSupported, other.isSupported) &&
+        _deepEquals(isReady, other.isReady) &&
+        _deepEquals(canInitialize, other.canInitialize) &&
+        _deepEquals(isInitializing, other.isInitializing) &&
+        _deepEquals(initializationProgress, other.initializationProgress) &&
         _deepEquals(reason, other.reason) &&
-        _deepEquals(modelStatus, other.modelStatus);
+        _deepEquals(platformStatus, other.platformStatus);
   }
 
   @override
@@ -152,7 +195,7 @@ class LocalAiAvailabilityMessage {
 
   @override
   String toString() {
-    return 'LocalAiAvailabilityMessage(isAvailable: $isAvailable, reason: $reason, modelStatus: $modelStatus)';
+    return 'LocalAiStatusMessage(isSupported: $isSupported, isReady: $isReady, canInitialize: $canInitialize, isInitializing: $isInitializing, initializationProgress: $initializationProgress, reason: $reason, platformStatus: $platformStatus)';
   }
 }
 
@@ -337,17 +380,20 @@ class _PigeonCodec extends StandardMessageCodec {
     if (value is int) {
       buffer.putUint8(4);
       buffer.putInt64(value);
-    } else if (value is LocalAiAvailabilityMessage) {
+    } else if (value is LocalAiInitializationPolicyMessage) {
       buffer.putUint8(129);
-      writeValue(buffer, value.encode());
-    } else if (value is LocalAiGenerationConfigMessage) {
+      writeValue(buffer, value.index);
+    } else if (value is LocalAiStatusMessage) {
       buffer.putUint8(130);
       writeValue(buffer, value.encode());
-    } else if (value is LocalAiGenerationResponseMessage) {
+    } else if (value is LocalAiGenerationConfigMessage) {
       buffer.putUint8(131);
       writeValue(buffer, value.encode());
-    } else if (value is LocalAiStreamChunkMessage) {
+    } else if (value is LocalAiGenerationResponseMessage) {
       buffer.putUint8(132);
+      writeValue(buffer, value.encode());
+    } else if (value is LocalAiStreamChunkMessage) {
+      buffer.putUint8(133);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -358,12 +404,17 @@ class _PigeonCodec extends StandardMessageCodec {
   Object? readValueOfType(int type, ReadBuffer buffer) {
     switch (type) {
       case 129:
-        return LocalAiAvailabilityMessage.decode(readValue(buffer)!);
+        final value = readValue(buffer) as int?;
+        return value == null
+            ? null
+            : LocalAiInitializationPolicyMessage.values[value];
       case 130:
-        return LocalAiGenerationConfigMessage.decode(readValue(buffer)!);
+        return LocalAiStatusMessage.decode(readValue(buffer)!);
       case 131:
-        return LocalAiGenerationResponseMessage.decode(readValue(buffer)!);
+        return LocalAiGenerationConfigMessage.decode(readValue(buffer)!);
       case 132:
+        return LocalAiGenerationResponseMessage.decode(readValue(buffer)!);
+      case 133:
         return LocalAiStreamChunkMessage.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
@@ -393,10 +444,10 @@ class OnDeviceAiHostApi {
 
   final String pigeonVar_messageChannelSuffix;
 
-  /// Checks whether the current device and OS can run local AI.
-  Future<LocalAiAvailabilityMessage> availability() async {
+  /// Checks the current device, OS, and model readiness.
+  Future<LocalAiStatusMessage> status() async {
     final pigeonVar_channelName =
-        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.availability$pigeonVar_messageChannelSuffix';
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.status$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -410,7 +461,31 @@ class OnDeviceAiHostApi {
       pigeonVar_channelName,
       isNullValid: false,
     );
-    return pigeonVar_replyValue! as LocalAiAvailabilityMessage;
+    return pigeonVar_replyValue! as LocalAiStatusMessage;
+  }
+
+  /// Ensures the native model is ready according to [policy].
+  Future<LocalAiStatusMessage> ensureReady(
+    LocalAiInitializationPolicyMessage policy,
+  ) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.ensureReady$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+      <Object?>[policy],
+    );
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: false,
+    );
+    return pigeonVar_replyValue! as LocalAiStatusMessage;
   }
 
   /// Creates a native model session.
@@ -540,5 +615,18 @@ Stream<LocalAiStreamChunkMessage> generationStream({String instanceName = ''}) {
   );
   return generationStreamChannel.receiveBroadcastStream().map((dynamic event) {
     return event as LocalAiStreamChunkMessage;
+  });
+}
+
+Stream<LocalAiStatusMessage> statusStream({String instanceName = ''}) {
+  if (instanceName.isNotEmpty) {
+    instanceName = '.$instanceName';
+  }
+  final EventChannel statusStreamChannel = EventChannel(
+    'dev.flutter.pigeon.flutter_native_ai.OnDeviceAiStreamApi.statusStream$instanceName',
+    pigeonMethodCodec,
+  );
+  return statusStreamChannel.receiveBroadcastStream().map((dynamic event) {
+    return event as LocalAiStatusMessage;
   });
 }

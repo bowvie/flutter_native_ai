@@ -29,6 +29,7 @@ import Foundation
 final class OnDeviceAiBridge: OnDeviceAiHostApi {
   private var sessions: [String: Any] = [:]
   private let streamHandler = LocalAiGenerationStreamHandler()
+  private let statusHandler = LocalAiStatusStreamHandler()
 
   /// Registers the event-channel stream handler used by streaming generation.
   func registerStreamHandler(with messenger: FlutterBinaryMessenger) {
@@ -36,11 +37,25 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
       with: messenger,
       streamHandler: streamHandler
     )
+    StatusStreamStreamHandler.register(
+      with: messenger,
+      streamHandler: statusHandler
+    )
   }
 
-  /// Returns the current Apple Foundation Models availability state.
-  func availability(completion: @escaping (Result<LocalAiAvailabilityMessage, Error>) -> Void) {
-    completion(.success(currentAvailability()))
+  /// Returns the current Apple Foundation Models support and readiness state.
+  func status(completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void) {
+    completion(.success(currentStatus()))
+  }
+
+  /// Refreshes Apple readiness. Foundation Models does not expose app-triggered downloads.
+  func ensureReady(
+    policy: LocalAiInitializationPolicyMessage,
+    completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void
+  ) {
+    let status = currentStatus()
+    statusHandler.emit(status)
+    completion(.success(status))
   }
 
   /// Creates a native Foundation Models session.
@@ -50,12 +65,12 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   ) {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
-        let availability = currentAvailability()
-        guard availability.isAvailable else {
+        let status = currentStatus()
+        guard status.isAvailable else {
           completion(.failure(PigeonError(
             code: "local-ai-unavailable",
-            message: availability.reason,
-            details: availability.modelStatus
+            message: status.reason,
+            details: status.platformStatus
           )))
           return
         }
@@ -98,12 +113,12 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   ) {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
-        let availability = currentAvailability()
-        guard availability.isAvailable else {
+        let status = currentStatus()
+        guard status.isAvailable else {
           completion(.failure(PigeonError(
             code: "local-ai-unavailable",
-            message: availability.reason,
-            details: availability.modelStatus
+            message: status.reason,
+            details: status.platformStatus
           )))
           return
         }
@@ -171,12 +186,12 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   ) {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
-        let availability = currentAvailability()
-        guard availability.isAvailable else {
+        let status = currentStatus()
+        guard status.isAvailable else {
           completion(.failure(PigeonError(
             code: "local-ai-unavailable",
-            message: availability.reason,
-            details: availability.modelStatus
+            message: status.reason,
+            details: status.platformStatus
           )))
           return
         }
@@ -220,37 +235,75 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   }
 
   /// Maps Foundation Models availability into a stable Pigeon message.
-  private func currentAvailability() -> LocalAiAvailabilityMessage {
+  private func currentStatus() -> LocalAiStatusMessage {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
         switch SystemLanguageModel.default.availability {
         case .available:
-          return LocalAiAvailabilityMessage(
-            isAvailable: true,
+          return LocalAiStatusMessage(
+            isSupported: true,
+            isReady: true,
+            canInitialize: false,
+            isInitializing: false,
             reason: nil,
-            modelStatus: "available"
+            platformStatus: "available"
           )
         case .unavailable(let reason):
-          return LocalAiAvailabilityMessage(
-            isAvailable: false,
+          return LocalAiStatusMessage(
+            isSupported: true,
+            isReady: false,
+            canInitialize: false,
+            isInitializing: false,
             reason: "Apple Foundation Models is unavailable: \(reason)",
-            modelStatus: String(describing: reason)
+            platformStatus: String(describing: reason)
           )
         @unknown default:
-          return LocalAiAvailabilityMessage(
-            isAvailable: false,
+          return LocalAiStatusMessage(
+            isSupported: true,
+            isReady: false,
+            canInitialize: false,
+            isInitializing: false,
             reason: "Apple Foundation Models availability is unknown.",
-            modelStatus: "unknown"
+            platformStatus: "unknown"
           )
         }
       }
     #endif
 
-    return LocalAiAvailabilityMessage(
-      isAvailable: false,
+    return LocalAiStatusMessage(
+      isSupported: false,
+      isReady: false,
+      canInitialize: false,
+      isInitializing: false,
       reason: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
-      modelStatus: "unsupported-os"
+      platformStatus: "unsupported-os"
     )
+  }
+}
+
+private extension LocalAiStatusMessage {
+  var isAvailable: Bool {
+    isSupported && isReady
+  }
+}
+
+/// Event-channel handler for model initialization status snapshots.
+final class LocalAiStatusStreamHandler: StatusStreamStreamHandler {
+  private var sink: PigeonEventSink<LocalAiStatusMessage>?
+
+  override func onListen(
+    withArguments arguments: Any?,
+    sink: PigeonEventSink<LocalAiStatusMessage>
+  ) {
+    self.sink = sink
+  }
+
+  override func onCancel(withArguments arguments: Any?) {
+    sink = nil
+  }
+
+  func emit(_ status: LocalAiStatusMessage) {
+    sink?.success(status)
   }
 }
 

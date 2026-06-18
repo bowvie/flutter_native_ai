@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_native_ai/flutter_native_ai.dart';
 
@@ -33,14 +35,14 @@ class _OnDeviceAiExampleScreenState extends State<OnDeviceAiExampleScreen> {
     text: 'Explain on-device AI in one short sentence.',
   );
 
-  OnDeviceAiAvailability? _availability;
+  OnDeviceAiStatus? _status;
   String _output = '';
   bool _isGenerating = false;
 
   @override
   void initState() {
     super.initState();
-    _checkAvailability();
+    _checkStatus();
   }
 
   @override
@@ -49,17 +51,20 @@ class _OnDeviceAiExampleScreenState extends State<OnDeviceAiExampleScreen> {
     super.dispose();
   }
 
-  Future<void> _checkAvailability() async {
-    final availability = await _ai.availability();
+  Future<void> _checkStatus() async {
+    final status = await _ai.status();
     if (!mounted) {
       return;
     }
-    setState(() => _availability = availability);
+    setState(() => _status = status);
   }
 
   Future<void> _generate() async {
-    final availability = _availability;
-    if (availability == null || !availability.isAvailable || _isGenerating) {
+    final status = _status;
+    if (status == null || _isGenerating) {
+      return;
+    }
+    if (!status.isAvailable && !status.canInitialize) {
       return;
     }
 
@@ -71,6 +76,7 @@ class _OnDeviceAiExampleScreenState extends State<OnDeviceAiExampleScreen> {
     try {
       final session = await _ai.createSession(
         instructions: 'You are concise and practical.',
+        initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded,
       );
       try {
         await for (final chunk in session.generateTextStream(
@@ -93,13 +99,14 @@ class _OnDeviceAiExampleScreenState extends State<OnDeviceAiExampleScreen> {
     } finally {
       if (mounted) {
         setState(() => _isGenerating = false);
+        unawaited(_checkStatus());
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final availability = _availability;
+    final status = _status;
 
     return Scaffold(
       appBar: AppBar(title: const Text('On-device AI')),
@@ -107,11 +114,13 @@ class _OnDeviceAiExampleScreenState extends State<OnDeviceAiExampleScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            availability == null
-                ? 'Checking availability...'
-                : availability.isAvailable
-                ? 'Available (${availability.modelStatus ?? 'ready'})'
-                : availability.reason ?? 'Unavailable',
+            status == null
+                ? 'Checking status...'
+                : status.isAvailable
+                ? 'Ready (${status.platformStatus ?? 'available'})'
+                : status.canInitialize
+                ? 'Model can be initialized (${status.platformStatus ?? 'not ready'})'
+                : status.reason ?? 'Unavailable',
           ),
           const SizedBox(height: 16),
           TextField(
@@ -125,7 +134,10 @@ class _OnDeviceAiExampleScreenState extends State<OnDeviceAiExampleScreen> {
           ),
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: availability?.isAvailable == true && !_isGenerating
+            onPressed:
+                status != null &&
+                    (status.isAvailable || status.canInitialize) &&
+                    !_isGenerating
                 ? _generate
                 : null,
             child: Text(_isGenerating ? 'Generating...' : 'Generate'),

@@ -17,22 +17,50 @@ import 'package:pigeon/pigeon.dart';
     dartPackageName: 'flutter_native_ai',
   ),
 )
-/// Availability state returned by the native local AI bridge.
-class LocalAiAvailabilityMessage {
-  LocalAiAvailabilityMessage({
-    required this.isAvailable,
+/// Current local AI support and model readiness state.
+class LocalAiStatusMessage {
+  LocalAiStatusMessage({
+    required this.isSupported,
+    required this.isReady,
+    required this.canInitialize,
+    required this.isInitializing,
+    this.initializationProgress,
     this.reason,
-    this.modelStatus,
+    this.platformStatus,
   });
 
-  /// Whether generation can run on this host.
-  bool isAvailable;
+  /// Whether this platform, OS, and device can support local AI.
+  bool isSupported;
 
-  /// Human-readable unavailable reason.
+  /// Whether generation can run now.
+  bool isReady;
+
+  /// Whether the native platform can initialize or download the model.
+  bool canInitialize;
+
+  /// Whether model initialization or download is currently running.
+  bool isInitializing;
+
+  /// Real initialization progress from 0 to 100, when the platform provides it.
+  int? initializationProgress;
+
+  /// Human-readable unavailable or initialization failure reason.
   String? reason;
 
   /// Raw platform model status for diagnostics.
-  String? modelStatus;
+  String? platformStatus;
+}
+
+/// Policy controlling whether readiness methods may initialize the model.
+enum LocalAiInitializationPolicyMessage {
+  /// Only check current status; never start model initialization.
+  never,
+
+  /// Initialize only when the model is supported but not ready.
+  whenNeeded,
+
+  /// Ask the platform to initialize or refresh readiness before proceeding.
+  always,
 }
 
 /// Generation controls passed from Dart to the native model session.
@@ -89,9 +117,13 @@ class LocalAiStreamChunkMessage {
 /// Host methods implemented by each supported platform runner.
 @HostApi()
 abstract class OnDeviceAiHostApi {
-  /// Checks whether the current device and OS can run local AI.
+  /// Checks the current device, OS, and model readiness.
   @async
-  LocalAiAvailabilityMessage availability();
+  LocalAiStatusMessage status();
+
+  /// Ensures the native model is ready according to [policy].
+  @async
+  LocalAiStatusMessage ensureReady(LocalAiInitializationPolicyMessage policy);
 
   /// Creates a native model session.
   @async
@@ -129,4 +161,7 @@ abstract class OnDeviceAiHostApi {
 abstract class OnDeviceAiStreamApi {
   /// Emits cumulative generation snapshots from the active native request.
   LocalAiStreamChunkMessage generationStream();
+
+  /// Emits model initialization status snapshots.
+  LocalAiStatusMessage statusStream();
 }

@@ -4,29 +4,63 @@ import 'package:flutter/services.dart';
 
 import 'generated/on_device_ai.g.dart' as generated;
 
-/// Current host support for on-device local AI generation.
-class OnDeviceAiAvailability {
-  const OnDeviceAiAvailability({
-    required this.isAvailable,
+/// Current host support and model readiness for on-device local AI generation.
+class OnDeviceAiStatus {
+  const OnDeviceAiStatus({
+    required this.isSupported,
+    required this.isReady,
+    required this.canInitialize,
+    required this.isInitializing,
+    this.initializationProgress,
     this.reason,
-    this.modelStatus,
+    this.platformStatus,
   });
 
-  /// Whether the host can run local AI generation for the current user/device.
-  final bool isAvailable;
+  /// Whether this platform, OS, and device can support local AI.
+  final bool isSupported;
 
-  /// Human-readable reason when [isAvailable] is false.
+  /// Whether generation can run now.
+  final bool isReady;
+
+  /// Whether the native platform can initialize or download the model.
+  final bool canInitialize;
+
+  /// Whether model initialization or download is currently running.
+  final bool isInitializing;
+
+  /// Convenience for the previous availability concept.
+  bool get isAvailable => isSupported && isReady;
+
+  /// Real initialization progress from 0 to 100, when the platform provides it.
+  final int? initializationProgress;
+
+  /// Human-readable reason when [isAvailable] is false or initialization fails.
   final String? reason;
 
   /// Raw platform status used for logging or diagnostics.
-  final String? modelStatus;
+  final String? platformStatus;
 
-  /// Availability returned when the platform plugin is not registered.
-  static const unsupported = OnDeviceAiAvailability(
-    isAvailable: false,
+  /// Status returned when the platform plugin is not registered.
+  static const unsupported = OnDeviceAiStatus(
+    isSupported: false,
+    isReady: false,
+    canInitialize: false,
+    isInitializing: false,
     reason: 'Local AI is not available on this platform.',
-    modelStatus: 'unsupported-platform',
+    platformStatus: 'unsupported-platform',
   );
+}
+
+/// Policy for model initialization before readiness-sensitive operations.
+enum OnDeviceAiInitializationPolicy {
+  /// Only check current status; never start model initialization.
+  never,
+
+  /// Initialize only when the model is supported but not ready.
+  whenNeeded,
+
+  /// Ask the platform to initialize or refresh readiness before proceeding.
+  always,
 }
 
 /// Generation options forwarded to the native on-device model.
@@ -80,7 +114,7 @@ class OnDeviceAiStreamChunk {
   final String? errorMessage;
 }
 
-/// Entry point for checking local AI availability and creating sessions.
+/// Entry point for checking local AI status and creating sessions.
 ///
 /// Generation always runs through an [OnDeviceAiSession]. Reusing the same
 /// session is the cross-platform way to preserve native session context when a
@@ -89,31 +123,60 @@ class OnDeviceAi {
   OnDeviceAi({
     generated.OnDeviceAiHostApi? hostApi,
     Stream<generated.LocalAiStreamChunkMessage> Function()? generationStream,
+    Stream<generated.LocalAiStatusMessage> Function()? statusStream,
   }) : _api = hostApi ?? generated.OnDeviceAiHostApi(),
-       _generationStream = generationStream ?? generated.generationStream;
+       _generationStream = generationStream ?? generated.generationStream,
+       _statusStream = statusStream ?? generated.statusStream;
 
   final generated.OnDeviceAiHostApi _api;
   final Stream<generated.LocalAiStreamChunkMessage> Function()
   _generationStream;
+  final Stream<generated.LocalAiStatusMessage> Function() _statusStream;
 
-  /// Returns local AI support for the current platform and model state.
-  Future<OnDeviceAiAvailability> availability() async {
+  /// Returns local AI support and model readiness for the current platform.
+  Future<OnDeviceAiStatus> status() async {
     try {
-      final message = await _api.availability();
-      return OnDeviceAiAvailability(
-        isAvailable: message.isAvailable,
-        reason: message.reason,
-        modelStatus: message.modelStatus,
-      );
+      final message = await _api.status();
+      return _mapStatus(message);
     } on PlatformException catch (error) {
-      return OnDeviceAiAvailability(
-        isAvailable: false,
-        reason: error.message ?? 'Local AI availability could not be checked.',
-        modelStatus: error.code,
+      return OnDeviceAiStatus(
+        isSupported: false,
+        isReady: false,
+        canInitialize: false,
+        isInitializing: false,
+        reason: error.message ?? 'Local AI status could not be checked.',
+        platformStatus: error.code,
       );
     } on MissingPluginException {
-      return OnDeviceAiAvailability.unsupported;
+      return OnDeviceAiStatus.unsupported;
     }
+  }
+
+  /// Ensures the native model is ready according to [policy].
+  Future<OnDeviceAiStatus> ensureReady({
+    OnDeviceAiInitializationPolicy policy =
+        OnDeviceAiInitializationPolicy.whenNeeded,
+  }) async {
+    try {
+      final message = await _api.ensureReady(_mapInitializationPolicy(policy));
+      return _mapStatus(message);
+    } on PlatformException catch (error) {
+      return OnDeviceAiStatus(
+        isSupported: false,
+        isReady: false,
+        canInitialize: false,
+        isInitializing: false,
+        reason: error.message ?? 'Local AI could not be initialized.',
+        platformStatus: error.code,
+      );
+    } on MissingPluginException {
+      return OnDeviceAiStatus.unsupported;
+    }
+  }
+
+  /// Emits model initialization status snapshots from the native platform.
+  Stream<OnDeviceAiStatus> statusStream() {
+    return _statusStream().map(_mapStatus);
   }
 
   /// Creates a reusable native model session.
@@ -121,13 +184,55 @@ class OnDeviceAi {
   /// Pass [instructions] to set the session's system behavior. Keep and reuse
   /// the returned [OnDeviceAiSession] for related prompts so platforms with
   /// stateful model sessions can retain context between calls.
-  Future<OnDeviceAiSession> createSession({String? instructions}) async {
+  Future<OnDeviceAiSession> createSession({
+    String? instructions,
+    OnDeviceAiInitializationPolicy initializationPolicy =
+        OnDeviceAiInitializationPolicy.never,
+  }) async {
+    if (initializationPolicy != OnDeviceAiInitializationPolicy.never) {
+      final currentStatus = await ensureReady(policy: initializationPolicy);
+      if (!currentStatus.isAvailable) {
+        throw PlatformException(
+          code: currentStatus.platformStatus ?? 'local-ai-unavailable',
+          message:
+              currentStatus.reason ??
+              'Local AI is not ready for generation on this platform.',
+          details: currentStatus.platformStatus,
+        );
+      }
+    }
+
     final session = await _api.createSession(instructions ?? '');
     return OnDeviceAiSession._(
       hostApi: _api,
       generationStream: _generationStream,
       session: session,
     );
+  }
+
+  OnDeviceAiStatus _mapStatus(generated.LocalAiStatusMessage message) {
+    return OnDeviceAiStatus(
+      isSupported: message.isSupported,
+      isReady: message.isReady,
+      canInitialize: message.canInitialize,
+      isInitializing: message.isInitializing,
+      initializationProgress: message.initializationProgress,
+      reason: message.reason,
+      platformStatus: message.platformStatus,
+    );
+  }
+
+  generated.LocalAiInitializationPolicyMessage _mapInitializationPolicy(
+    OnDeviceAiInitializationPolicy policy,
+  ) {
+    return switch (policy) {
+      OnDeviceAiInitializationPolicy.never =>
+        generated.LocalAiInitializationPolicyMessage.never,
+      OnDeviceAiInitializationPolicy.whenNeeded =>
+        generated.LocalAiInitializationPolicyMessage.whenNeeded,
+      OnDeviceAiInitializationPolicy.always =>
+        generated.LocalAiInitializationPolicyMessage.always,
+    };
   }
 }
 

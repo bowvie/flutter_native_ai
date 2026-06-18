@@ -1,5 +1,15 @@
 ## 0.3.0
 
+- Replaces `availability()` with `status()` and `OnDeviceAiStatus`, separating
+    platform support, model readiness, initialization capability, and raw native
+    diagnostics.
+- Adds `ensureReady()` for explicit model initialization/download flows.
+- Adds `OnDeviceAiInitializationPolicy` and opt-in just-in-time initialization
+    through `createSession(initializationPolicy: ...)`.
+- Adds `statusStream()` for model initialization status updates, including real
+    `0..100` Android download progress when ML Kit supplies enough byte data.
+- Adds Android Gemini Nano model download support through ML Kit
+    `GenerativeModel.download()`.
 - Replaces service-level initialization and generation with explicit
     `OnDeviceAiSession` creation.
 - Adds session-scoped non-streaming generation, streaming generation,

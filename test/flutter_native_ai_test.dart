@@ -6,74 +6,153 @@ import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
 import 'package:flutter_native_ai/src/on_device_ai_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-OnDeviceAi _serviceFor(_FakeHostApi api) =>
-    OnDeviceAi(hostApi: api, generationStream: api.generationStream);
+OnDeviceAi _serviceFor(_FakeHostApi api) => OnDeviceAi(
+  hostApi: api,
+  generationStream: api.generationStream,
+  statusStream: api.statusStream,
+);
 
 void main() {
   group('OnDeviceAi', () {
-    test('maps availability responses', () async {
+    test('maps status responses', () async {
       final service = _serviceFor(
         _FakeHostApi(
-          availabilityResponse: generated.LocalAiAvailabilityMessage(
-            isAvailable: true,
-            modelStatus: 'available',
+          statusResponse: generated.LocalAiStatusMessage(
+            isSupported: true,
+            isReady: true,
+            canInitialize: false,
+            isInitializing: false,
+            platformStatus: 'available',
           ),
         ),
       );
 
-      final availability = await service.availability();
+      final status = await service.status();
 
-      expect(availability.isAvailable, isTrue);
-      expect(availability.reason, isNull);
-      expect(availability.modelStatus, 'available');
+      expect(status.isSupported, isTrue);
+      expect(status.isReady, isTrue);
+      expect(status.isAvailable, isTrue);
+      expect(status.reason, isNull);
+      expect(status.platformStatus, 'available');
     });
 
-    test(
-      'returns unsupported availability for missing platform plugin',
-      () async {
-        final service = _serviceFor(
-          _FakeHostApi(availabilityError: MissingPluginException()),
-        );
-
-        final availability = await service.availability();
-
-        expect(availability.isAvailable, isFalse);
-        expect(availability.modelStatus, 'unsupported-platform');
-      },
-    );
-
-    test('maps platform availability errors into unavailable state', () async {
+    test('maps initialization status fields', () async {
       final service = _serviceFor(
         _FakeHostApi(
-          availabilityError: PlatformException(
-            code: 'availability-failed',
+          statusResponse: generated.LocalAiStatusMessage(
+            isSupported: true,
+            isReady: false,
+            canInitialize: true,
+            isInitializing: true,
+            initializationProgress: 42,
+            reason: 'Downloading model.',
+            platformStatus: 'downloading',
+          ),
+        ),
+      );
+
+      final status = await service.status();
+
+      expect(status.isAvailable, isFalse);
+      expect(status.canInitialize, isTrue);
+      expect(status.isInitializing, isTrue);
+      expect(status.initializationProgress, 42);
+      expect(status.reason, 'Downloading model.');
+      expect(status.platformStatus, 'downloading');
+    });
+
+    test('returns unsupported status for missing platform plugin', () async {
+      final service = _serviceFor(
+        _FakeHostApi(statusError: MissingPluginException()),
+      );
+
+      final status = await service.status();
+
+      expect(status.isAvailable, isFalse);
+      expect(status.platformStatus, 'unsupported-platform');
+    });
+
+    test('maps platform status errors into unavailable state', () async {
+      final service = _serviceFor(
+        _FakeHostApi(
+          statusError: PlatformException(
+            code: 'status-failed',
             message: 'Model status could not be read.',
           ),
         ),
       );
 
-      final availability = await service.availability();
+      final status = await service.status();
 
-      expect(availability.isAvailable, isFalse);
-      expect(availability.reason, 'Model status could not be read.');
-      expect(availability.modelStatus, 'availability-failed');
+      expect(status.isAvailable, isFalse);
+      expect(status.reason, 'Model status could not be read.');
+      expect(status.platformStatus, 'status-failed');
     });
 
-    test('uses fallback availability message for platform errors', () async {
+    test('uses fallback status message for platform errors', () async {
+      final service = _serviceFor(
+        _FakeHostApi(statusError: PlatformException(code: 'status-failed')),
+      );
+
+      final status = await service.status();
+
+      expect(status.isAvailable, isFalse);
+      expect(status.reason, 'Local AI status could not be checked.');
+      expect(status.platformStatus, 'status-failed');
+    });
+
+    test('ensures readiness with the requested policy', () async {
+      final api = _FakeHostApi(
+        ensureReadyResponse: generated.LocalAiStatusMessage(
+          isSupported: true,
+          isReady: true,
+          canInitialize: false,
+          isInitializing: false,
+          initializationProgress: 100,
+          platformStatus: 'available',
+        ),
+      );
+      final service = _serviceFor(api);
+
+      final status = await service.ensureReady(
+        policy: OnDeviceAiInitializationPolicy.always,
+      );
+
+      expect(status.isAvailable, isTrue);
+      expect(status.initializationProgress, 100);
+      expect(api.ensureReadyPolicies, [
+        generated.LocalAiInitializationPolicyMessage.always,
+      ]);
+    });
+
+    test('maps status stream updates', () async {
       final service = _serviceFor(
         _FakeHostApi(
-          availabilityError: PlatformException(code: 'availability-failed'),
+          statusChunks: [
+            generated.LocalAiStatusMessage(
+              isSupported: true,
+              isReady: false,
+              canInitialize: true,
+              isInitializing: true,
+              initializationProgress: null,
+              platformStatus: 'downloading',
+            ),
+            generated.LocalAiStatusMessage(
+              isSupported: true,
+              isReady: true,
+              canInitialize: false,
+              isInitializing: false,
+              initializationProgress: 100,
+              platformStatus: 'available',
+            ),
+          ],
         ),
       );
 
-      final availability = await service.availability();
+      final statuses = await service.statusStream().toList();
 
-      expect(availability.isAvailable, isFalse);
-      expect(
-        availability.reason,
-        'Local AI availability could not be checked.',
-      );
-      expect(availability.modelStatus, 'availability-failed');
+      expect(statuses.map((status) => status.isInitializing), [true, false]);
+      expect(statuses.last.initializationProgress, 100);
     });
 
     test('creates a session with default empty instructions', () async {
@@ -93,6 +172,57 @@ void main() {
 
       expect(api.createdInstructions, ['Answer in one sentence.']);
     });
+
+    test('ensures readiness before session creation when requested', () async {
+      final api = _FakeHostApi(
+        ensureReadyResponse: generated.LocalAiStatusMessage(
+          isSupported: true,
+          isReady: true,
+          canInitialize: false,
+          isInitializing: false,
+          platformStatus: 'available',
+        ),
+      );
+      final service = _serviceFor(api);
+
+      await service.createSession(
+        initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded,
+      );
+
+      expect(api.ensureReadyPolicies, [
+        generated.LocalAiInitializationPolicyMessage.whenNeeded,
+      ]);
+      expect(api.createdInstructions, ['']);
+    });
+
+    test(
+      'does not create a session when initialization cannot make AI ready',
+      () async {
+        final api = _FakeHostApi(
+          ensureReadyResponse: generated.LocalAiStatusMessage(
+            isSupported: true,
+            isReady: false,
+            canInitialize: false,
+            isInitializing: false,
+            reason: 'Model blocked.',
+            platformStatus: 'blocked',
+          ),
+        );
+        final service = _serviceFor(api);
+
+        await expectLater(
+          service.createSession(
+            initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded,
+          ),
+          throwsA(
+            isA<PlatformException>()
+                .having((error) => error.code, 'code', 'blocked')
+                .having((error) => error.message, 'message', 'Model blocked.'),
+          ),
+        );
+        expect(api.createdInstructions, isEmpty);
+      },
+    );
   });
 
   group('OnDeviceAiSession', () {
@@ -320,8 +450,10 @@ void main() {
 
 class _FakeHostApi extends generated.OnDeviceAiHostApi {
   _FakeHostApi({
-    this.availabilityResponse,
-    this.availabilityError,
+    this.statusResponse,
+    this.statusError,
+    this.ensureReadyResponse,
+    this.statusChunks = const [],
     this.generationResponse,
     this.streamChunks = const [],
     this.streamError,
@@ -329,14 +461,17 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
     this.disposeError,
   });
 
-  final generated.LocalAiAvailabilityMessage? availabilityResponse;
-  final Exception? availabilityError;
+  final generated.LocalAiStatusMessage? statusResponse;
+  final Exception? statusError;
+  final generated.LocalAiStatusMessage? ensureReadyResponse;
+  final List<generated.LocalAiStatusMessage> statusChunks;
   final generated.LocalAiGenerationResponseMessage? generationResponse;
   final List<generated.LocalAiStreamChunkMessage> streamChunks;
   final Exception? streamError;
   final Exception? startStreamError;
   Exception? disposeError;
 
+  final ensureReadyPolicies = <generated.LocalAiInitializationPolicyMessage>[];
   final createdInstructions = <String>[];
   final disposedSessions = <String>[];
   String? lastSession;
@@ -349,17 +484,28 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
   bool generationStreamCancelled = false;
 
   @override
-  Future<generated.LocalAiAvailabilityMessage> availability() async {
-    final error = availabilityError;
+  Future<generated.LocalAiStatusMessage> status() async {
+    final error = statusError;
     if (error != null) {
       throw error;
     }
-    return availabilityResponse ??
-        generated.LocalAiAvailabilityMessage(
-          isAvailable: false,
+    return statusResponse ??
+        generated.LocalAiStatusMessage(
+          isSupported: false,
+          isReady: false,
+          canInitialize: false,
+          isInitializing: false,
           reason: 'Unavailable',
-          modelStatus: 'unavailable',
+          platformStatus: 'unavailable',
         );
+  }
+
+  @override
+  Future<generated.LocalAiStatusMessage> ensureReady(
+    generated.LocalAiInitializationPolicyMessage policy,
+  ) async {
+    ensureReadyPolicies.add(policy);
+    return ensureReadyResponse ?? await status();
   }
 
   @override
@@ -437,5 +583,9 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
     });
 
     return controller.stream;
+  }
+
+  Stream<generated.LocalAiStatusMessage> statusStream() {
+    return Stream<generated.LocalAiStatusMessage>.fromIterable(statusChunks);
   }
 }

@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This is a Flutter plugin that exposes a single, intentionally small Dart API for private, on-device text generation. It bridges Apple Foundation Models (iOS 26+, macOS 26+) and Gemini Nano through ML Kit Prompt API (Android). The package does not send prompts or generated text to any server.
+This is a Flutter plugin that exposes a single, intentionally small Dart API for private, on-device text generation. It bridges Apple Foundation Models (iOS 26+, macOS 26+) and Gemini Nano through ML Kit Prompt API (Android). The package can initialize/download supported Android models locally when explicitly requested. It does not send prompts or generated text to any server.
 
 ## Architecture
 
@@ -16,7 +16,13 @@ The public API surface is exported from `lib/flutter_native_ai.dart`. Only what 
 
 ## Key Constraints
 
-**Availability must be checked first.** The plugin installs on older OS versions where native AI is unavailable. `availability()` is the gate; never assume a session can be created without checking it.
+**Status must be checked first.** The plugin installs on older OS versions where native AI is unavailable. `status()` is the gate; never assume a session can be created without checking it.
+
+**Status separates support from readiness.** `OnDeviceAiStatus.isSupported` means the host can support local AI; `isReady` means generation can run now; `isAvailable` is the convenience getter for `isSupported && isReady`. `canInitialize` and `isInitializing` describe model initialization/download capability, not generation state.
+
+**Initialization is explicit.** `ensureReady()` may initialize/download a model when the platform supports it. `createSession()` does not initialize by default; callers must pass `initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded` or `always` for just-in-time initialization.
+
+**Initialization progress is real or null.** `statusStream()` emits model initialization status snapshots. `initializationProgress` is a nullable `0..100` integer and must only be set from real native progress. Do not synthesize percentages from time, polling count, or guessed phases.
 
 **Stream chunks are cumulative snapshots.** Each chunk contains the full text generated so far, not a delta. If the model emits `"Hello"` then `"Hello world"`, the stream emits both. Consumer UIs should replace, not append.
 
@@ -44,13 +50,17 @@ The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_nativ
 ### Apple (iOS / macOS)
 - Requires `FoundationModels` framework, available from iOS 26.0 and macOS 26.0.
 - The bridge is compiled even on SDKs without `FoundationModels` using `#if canImport(FoundationModels)` guards, so older SDKs build cleanly.
-- Runtime availability maps `SystemLanguageModel.default.availability` directly to the Pigeon message.
+- Runtime status maps `SystemLanguageModel.default.availability` into `LocalAiStatusMessage`.
+- `ensureReady()` is an immediate status refresh on Apple. Foundation Models does not expose an app-triggered download path today.
 - Sessions are stored as `[String: Any]` keyed by a UUID string. Type-cast to `LocalAiSession` when retrieved.
 - Streaming uses `LanguageModelSession.streamResponse`. Foundation Models itself emits cumulative snapshots: each `snapshot.content` is the full text generated so far. The bridge assigns `latestText = snapshot.content` and forwards it directly — no manual accumulation needed on the Apple side.
 - The shared Darwin source package lives under `darwin/flutter_native_ai`. Both CocoaPods (`darwin/flutter_native_ai.podspec`) and Swift Package Manager (`darwin/flutter_native_ai/Package.swift`) consume it.
 
 ### Android
-- Uses ML Kit Prompt API (`com.google.mlkit.genai`). Reports `downloadable` and `downloading` states as unavailable — the package does not trigger model downloads.
+- Uses ML Kit Prompt API (`com.google.mlkit.genai`).
+- `status()` maps `FeatureStatus.AVAILABLE` to ready, `DOWNLOADABLE` to supported/not ready/can initialize, `DOWNLOADING` to supported/not ready/initializing, and `UNAVAILABLE` to unsupported/not ready.
+- `ensureReady()` uses `GenerativeModel.download()` for Android model download/provisioning when the model is downloadable or already downloading.
+- Android initialization progress comes from ML Kit `DownloadStatus`: `DownloadStarted.bytesToDownload`, `DownloadProgress.totalBytesDownloaded`, `DownloadCompleted`, and `DownloadFailed`. Compute `initializationProgress` only when real byte progress is available; emit `100` on completion.
 - `LocalAiSession` manually simulates conversation history by composing a text prompt that includes instructions, previous turns (user + assistant), and the new user request. History is capped at 20 messages.
 - The bridge runs on a `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)`. Background work dispatches to `Dispatchers.Default`. Stream handler runs on its own `CoroutineScope(Dispatchers.Default)`.
 - `maxOutputTokens` is clamped to `[1, 256]`. The default when not specified is 160.
@@ -89,6 +99,12 @@ All five steps must pass before merging. Format and analyze are strict — no wa
 5. Export any new public types from `lib/flutter_native_ai.dart`.
 6. Add unit tests in `test/` using `_FakeHostApi`.
 7. Update `CHANGELOG.md`.
+
+### Updating model lifecycle behaviour
+1. Keep `status()` non-mutating. It should only report current support/readiness/initialization state.
+2. Put mutating model setup in `ensureReady()`.
+3. Keep `createSession()` default behaviour non-mutating. Any just-in-time initialization must be gated by an explicit initialization policy.
+4. Preserve nullable progress semantics: report progress only when the native platform provides real progress.
 
 ### Adding a new platform
 1. Add an entry under `flutter.plugin.platforms` in `pubspec.yaml`.

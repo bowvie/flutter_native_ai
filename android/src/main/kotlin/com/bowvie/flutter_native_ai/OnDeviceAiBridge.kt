@@ -1,16 +1,19 @@
 package com.bowvie.flutter_native_ai
 
 import android.os.SystemClock
+import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.prompt.Generation
 import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.generateContentRequest
 import io.flutter.plugin.common.BinaryMessenger
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
@@ -38,28 +41,74 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val generationClient = Generation.getClient()
     private val streamHandler = LocalAiGenerationStreamHandler()
+    private val statusHandler = LocalAiStatusStreamHandler()
     private val sessions = mutableMapOf<String, LocalAiSession>()
+    private var initializationJob: Deferred<LocalAiStatusMessage>? = null
 
     fun registerStreamHandler(messenger: BinaryMessenger) {
         GenerationStreamStreamHandler.register(messenger, streamHandler)
+        StatusStreamStreamHandler.register(messenger, statusHandler)
     }
 
-    override fun availability(callback: (Result<LocalAiAvailabilityMessage>) -> Unit) {
+    override fun status(callback: (Result<LocalAiStatusMessage>) -> Unit) {
         scope.launch {
-            val availability = withContext(Dispatchers.Default) {
-                currentAvailability()
+            val status = withContext(Dispatchers.Default) {
+                currentStatus()
             }
-            callback(Result.success(availability))
+            callback(Result.success(status))
+        }
+    }
+
+    override fun ensureReady(
+        policy: LocalAiInitializationPolicyMessage,
+        callback: (Result<LocalAiStatusMessage>) -> Unit,
+    ) {
+        scope.launch {
+            try {
+                if (policy == LocalAiInitializationPolicyMessage.NEVER) {
+                    callback(Result.success(withContext(Dispatchers.Default) { currentStatus() }))
+                    return@launch
+                }
+
+                val currentStatus = withContext(Dispatchers.Default) {
+                    currentStatus()
+                }
+                if (currentStatus.isAvailable || !currentStatus.canInitialize) {
+                    callback(Result.success(currentStatus))
+                    return@launch
+                }
+
+                val job = initializationJob ?: async(Dispatchers.Default) {
+                    initializeModel()
+                }.also { deferred ->
+                    initializationJob = deferred
+                    deferred.invokeOnCompletion {
+                        scope.launch {
+                            if (initializationJob === deferred) {
+                                initializationJob = null
+                            }
+                        }
+                    }
+                }
+
+                callback(Result.success(job.await()))
+            } catch (error: CancellationException) {
+                callback(Result.failure(error))
+            } catch (error: Throwable) {
+                val failed = initializationFailedStatus(error)
+                statusHandler.emit(failed)
+                callback(Result.success(failed))
+            }
         }
     }
 
     override fun createSession(instructions: String, callback: (Result<String>) -> Unit) {
         scope.launch {
-            val availability = withContext(Dispatchers.Default) {
-                currentAvailability()
+            val status = withContext(Dispatchers.Default) {
+                currentStatus()
             }
-            if (!availability.isAvailable) {
-                callback(Result.failure(unavailableError(availability)))
+            if (!status.isAvailable) {
+                callback(Result.failure(unavailableError(status)))
                 return@launch
             }
 
@@ -90,9 +139,9 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                 }
 
                 val result = withContext(Dispatchers.Default) {
-                    val availability = currentAvailability()
-                    if (!availability.isAvailable) {
-                        throw unavailableError(availability)
+                    val status = currentStatus()
+                    if (!status.isAvailable) {
+                        throw unavailableError(status)
                     }
 
                     val startTime = SystemClock.elapsedRealtimeNanos()
@@ -143,11 +192,11 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         callback: (Result<Unit>) -> Unit,
     ) {
         scope.launch {
-            val availability = withContext(Dispatchers.Default) {
-                currentAvailability()
+            val status = withContext(Dispatchers.Default) {
+                currentStatus()
             }
-            if (!availability.isAvailable) {
-                callback(Result.failure(unavailableError(availability)))
+            if (!status.isAvailable) {
+                callback(Result.failure(unavailableError(status)))
                 return@launch
             }
 
@@ -174,54 +223,150 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
 
     fun close() {
         streamHandler.close()
+        statusHandler.close()
+        initializationJob?.cancel()
+        initializationJob = null
         scope.cancel()
     }
 
-    private suspend fun currentAvailability(): LocalAiAvailabilityMessage {
+    private suspend fun currentStatus(): LocalAiStatusMessage {
         return try {
             when (val status = generationClient.checkStatus()) {
-                FeatureStatus.AVAILABLE -> LocalAiAvailabilityMessage(
-                    isAvailable = true,
+                FeatureStatus.AVAILABLE -> LocalAiStatusMessage(
+                    isSupported = true,
+                    isReady = true,
+                    canInitialize = false,
+                    isInitializing = false,
                     reason = null,
-                    modelStatus = "available",
+                    platformStatus = "available",
                 )
-                FeatureStatus.DOWNLOADABLE -> LocalAiAvailabilityMessage(
-                    isAvailable = false,
+                FeatureStatus.DOWNLOADABLE -> LocalAiStatusMessage(
+                    isSupported = true,
+                    isReady = false,
+                    canInitialize = true,
+                    isInitializing = false,
                     reason = "Gemini Nano is supported but the model is not downloaded yet.",
-                    modelStatus = "downloadable",
+                    platformStatus = "downloadable",
                 )
-                FeatureStatus.DOWNLOADING -> LocalAiAvailabilityMessage(
-                    isAvailable = false,
+                FeatureStatus.DOWNLOADING -> LocalAiStatusMessage(
+                    isSupported = true,
+                    isReady = false,
+                    canInitialize = true,
+                    isInitializing = true,
                     reason = "Gemini Nano is still downloading on this device.",
-                    modelStatus = "downloading",
+                    platformStatus = "downloading",
                 )
-                FeatureStatus.UNAVAILABLE -> LocalAiAvailabilityMessage(
-                    isAvailable = false,
+                FeatureStatus.UNAVAILABLE -> LocalAiStatusMessage(
+                    isSupported = false,
+                    isReady = false,
+                    canInitialize = false,
+                    isInitializing = false,
                     reason = "Gemini Nano is not available on this device.",
-                    modelStatus = "unavailable",
+                    platformStatus = "unavailable",
                 )
-                else -> LocalAiAvailabilityMessage(
-                    isAvailable = false,
+                else -> LocalAiStatusMessage(
+                    isSupported = false,
+                    isReady = false,
+                    canInitialize = false,
+                    isInitializing = false,
                     reason = "Gemini Nano availability is unknown.",
-                    modelStatus = status.toString(),
+                    platformStatus = status.toString(),
                 )
             }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            LocalAiAvailabilityMessage(
-                isAvailable = false,
+            LocalAiStatusMessage(
+                isSupported = false,
+                isReady = false,
+                canInitialize = false,
+                isInitializing = false,
                 reason = error.localizedMessage ?: "Gemini Nano availability could not be checked.",
-                modelStatus = error.javaClass.simpleName,
+                platformStatus = error.javaClass.simpleName,
             )
         }
     }
 
-    private fun unavailableError(availability: LocalAiAvailabilityMessage): FlutterError {
+    private suspend fun initializeModel(): LocalAiStatusMessage {
+        var totalBytes: Long? = null
+        var latestStatus = currentStatus()
+        var terminalStatus: LocalAiStatusMessage? = null
+        statusHandler.emit(latestStatus.copy(isInitializing = true))
+
+        try {
+            generationClient.download().collect { status ->
+                latestStatus = when (status) {
+                    is DownloadStatus.DownloadStarted -> {
+                        totalBytes = status.bytesToDownload.takeIf { it > 0 }
+                        currentStatus().copy(
+                            isInitializing = true,
+                            initializationProgress = null,
+                            platformStatus = "downloading",
+                        )
+                    }
+                    is DownloadStatus.DownloadProgress -> {
+                        val progress = totalBytes?.let { total ->
+                            ((status.totalBytesDownloaded.toDouble() / total.toDouble()) * 100)
+                                .toInt()
+                                .coerceIn(0, 100)
+                        }
+                        currentStatus().copy(
+                            isInitializing = true,
+                            initializationProgress = progress,
+                            platformStatus = "downloading",
+                        )
+                    }
+                    is DownloadStatus.DownloadCompleted -> LocalAiStatusMessage(
+                        isSupported = true,
+                        isReady = true,
+                        canInitialize = false,
+                        isInitializing = false,
+                        initializationProgress = 100,
+                        reason = null,
+                        platformStatus = "available",
+                    )
+                    is DownloadStatus.DownloadFailed -> initializationFailedStatus(status.e)
+                    else -> currentStatus()
+                }
+                if (
+                    status is DownloadStatus.DownloadCompleted ||
+                    status is DownloadStatus.DownloadFailed
+                ) {
+                    terminalStatus = latestStatus
+                }
+                statusHandler.emit(latestStatus)
+            }
+
+            terminalStatus?.let { return it }
+            val finalStatus = currentStatus()
+            return if (finalStatus.isAvailable) {
+                finalStatus.copy(initializationProgress = 100)
+            } else {
+                finalStatus
+            }.also { statusHandler.emit(it) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            return initializationFailedStatus(error).also { statusHandler.emit(it) }
+        }
+    }
+
+    private fun initializationFailedStatus(error: Throwable): LocalAiStatusMessage {
+        return LocalAiStatusMessage(
+            isSupported = true,
+            isReady = false,
+            canInitialize = true,
+            isInitializing = false,
+            reason = error.localizedMessage ?: "Gemini Nano model initialization failed.",
+            platformStatus = "initialization-failed",
+        )
+    }
+
+    private fun unavailableError(status: LocalAiStatusMessage): FlutterError {
         return FlutterError(
             LOCAL_AI_UNAVAILABLE,
-            availability.reason,
-            availability.modelStatus,
+            status.reason,
+            status.platformStatus,
         )
     }
 
@@ -237,6 +382,9 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         return (SystemClock.elapsedRealtimeNanos() - startTimeNanos) / 1_000_000.0
     }
 }
+
+private val LocalAiStatusMessage.isAvailable: Boolean
+    get() = isSupported && isReady
 
 private class LocalAiSession(
     private val instructions: String,
@@ -274,6 +422,28 @@ private class LocalAiSession(
 }
 
 private data class LocalAiMessage(val role: String, val text: String)
+
+private class LocalAiStatusStreamHandler : StatusStreamStreamHandler() {
+    private var sink: PigeonEventSink<LocalAiStatusMessage>? = null
+
+    override fun onListen(p0: Any?, sink: PigeonEventSink<LocalAiStatusMessage>) {
+        this.sink = sink
+    }
+
+    override fun onCancel(p0: Any?) {
+        sink = null
+    }
+
+    suspend fun emit(status: LocalAiStatusMessage) {
+        withContext(Dispatchers.Main.immediate) {
+            sink?.success(status)
+        }
+    }
+
+    fun close() {
+        sink = null
+    }
+}
 
 private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
