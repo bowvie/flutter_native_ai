@@ -46,7 +46,7 @@ The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_nativ
 - The bridge is compiled even on SDKs without `FoundationModels` using `#if canImport(FoundationModels)` guards, so older SDKs build cleanly.
 - Runtime availability maps `SystemLanguageModel.default.availability` directly to the Pigeon message.
 - Sessions are stored as `[String: Any]` keyed by a UUID string. Type-cast to `LocalAiSession` when retrieved.
-- Streaming uses `LanguageModelSession.streamResponse`. Chunks are cumulative: the bridge accumulates `snapshot.content` and re-emits it as a growing snapshot, matching the contract.
+- Streaming uses `LanguageModelSession.streamResponse`. Foundation Models itself emits cumulative snapshots: each `snapshot.content` is the full text generated so far. The bridge assigns `latestText = snapshot.content` and forwards it directly — no manual accumulation needed on the Apple side.
 - The shared Darwin source package lives under `darwin/flutter_native_ai`. Both CocoaPods (`darwin/flutter_native_ai.podspec`) and Swift Package Manager (`darwin/flutter_native_ai/Package.swift`) consume it.
 
 ### Android
@@ -77,7 +77,7 @@ CI runs on `ubuntu-latest` via `.github/workflows/ci.yml` on every push to `main
 4. `flutter test test`
 5. `dart pub publish --dry-run`
 
-All four steps must pass before merging. Format and analyze are strict — no warnings are acceptable.
+All five steps must pass before merging. Format and analyze are strict — no warnings are acceptable.
 
 ## Development Workflow
 
