@@ -309,6 +309,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                             ((status.totalBytesDownloaded.toDouble() / total.toDouble()) * 100)
                                 .toInt()
                                 .coerceIn(0, 100)
+                                .toLong()
                         }
                         currentStatus().copy(
                             isInitializing = true,
@@ -321,7 +322,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                         isReady = true,
                         canInitialize = false,
                         isInitializing = false,
-                        initializationProgress = 100,
+                        initializationProgress = 100L,
                         reason = null,
                         platformStatus = "available",
                     )
@@ -340,7 +341,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
             terminalStatus?.let { return it }
             val finalStatus = currentStatus()
             return if (finalStatus.isAvailable) {
-                finalStatus.copy(initializationProgress = 100)
+                finalStatus.copy(initializationProgress = 100L)
             } else {
                 finalStatus
             }.also { statusHandler.emit(it) }
