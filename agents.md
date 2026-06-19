@@ -34,6 +34,8 @@ The public API surface is exported from `lib/flutter_native_ai.dart`. Only what 
 
 **Session disposal is retryable.** If `disposeSession` throws, `isDisposed` reverts to `false` so the caller can retry. This is intentional — do not change it.
 
+**Service layer errors are typed.** All exceptions thrown by `OnDeviceAi` and `OnDeviceAiSession` are subclasses of `OnDeviceAiException`, not raw `PlatformException`. The mapping from native error codes to exception types lives in `_mapPlatformException` in `lib/src/on_device_ai_service.dart`. Never let a `PlatformException` from the native bridge propagate to callers unmodified.
+
 ## Pigeon Code Generation
 
 All platform channel types and method signatures live in `pigeons/on_device_ai.dart`. After changing this file, regenerate all bindings:
