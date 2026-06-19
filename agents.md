@@ -91,6 +91,17 @@ CI runs on `ubuntu-latest` via `.github/workflows/ci.yml` on every push to `main
 
 All five steps must pass before merging. Format and analyze are strict — no warnings are acceptable.
 
+## Branch Naming
+
+All branches must follow the pattern `<type>/<short-description>` in kebab-case:
+
+- `fix/<description>` — bug fixes (e.g. `fix/android-single-ml-kit-client`)
+- `feat/<description>` — new features (e.g. `feat/typed-dart-exceptions`)
+- `chore/<description>` — release, tooling, or maintenance (e.g. `chore/release-0-4-1`)
+- `docs/<description>` — documentation only (e.g. `docs/agents-release-workflow`)
+
+Never use auto-generated names like `username-random-words`. Always call `rename_branch` before making any commits in a new session.
+
 ## Release Workflow
 
 1. Bump `version` in `pubspec.yaml` and `s.version` in `darwin/flutter_native_ai.podspec` to the new version (they must always match).
