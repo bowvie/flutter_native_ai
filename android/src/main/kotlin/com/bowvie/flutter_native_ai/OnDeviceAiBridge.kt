@@ -67,7 +67,9 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         scope.launch {
             try {
                 if (policy == LocalAiInitializationPolicyMessage.NEVER) {
-                    callback(Result.success(withContext(Dispatchers.Default) { currentStatus() }))
+                    val neverStatus = withContext(Dispatchers.Default) { currentStatus() }
+                    statusHandler.emit(neverStatus)
+                    callback(Result.success(neverStatus))
                     return@launch
                 }
 
@@ -75,6 +77,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                     currentStatus()
                 }
                 if (currentStatus.isAvailable || !currentStatus.canInitialize) {
+                    statusHandler.emit(currentStatus)
                     callback(Result.success(currentStatus))
                     return@launch
                 }
