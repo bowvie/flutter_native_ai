@@ -1,4 +1,4 @@
-## 0.4.0 (TBD)
+## 0.4.0
 
 - Replaces `availability()` with `status()` and `OnDeviceAiStatus`, separating
     platform support, model readiness, initialization capability, and raw native
