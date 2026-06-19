@@ -224,6 +224,29 @@ void main() {
         expect(api.createdInstructions, isEmpty);
       },
     );
+
+    test(
+      'maps PlatformException from createSession to a typed exception',
+      () async {
+        final api = _FakeHostApi(
+          createSessionError: PlatformException(
+            code: 'local-ai-unavailable',
+            message: 'Model not ready.',
+            details: 'downloadable',
+          ),
+        );
+        final service = _serviceFor(api);
+
+        await expectLater(
+          service.createSession(),
+          throwsA(
+            isA<OnDeviceAiUnavailableException>()
+                .having((e) => e.message, 'message', 'Model not ready.')
+                .having((e) => e.details, 'details', 'downloadable'),
+          ),
+        );
+      },
+    );
   });
 
   group('OnDeviceAiSession', () {
@@ -630,6 +653,7 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
     this.streamError,
     this.startStreamError,
     this.disposeError,
+    this.createSessionError,
   });
 
   final generated.LocalAiStatusMessage? statusResponse;
@@ -642,6 +666,7 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
   final Exception? streamError;
   final Exception? startStreamError;
   Exception? disposeError;
+  final Exception? createSessionError;
 
   final ensureReadyPolicies = <generated.LocalAiInitializationPolicyMessage>[];
   final createdInstructions = <String>[];
@@ -682,6 +707,10 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
 
   @override
   Future<String> createSession(String instructions) async {
+    final error = createSessionError;
+    if (error != null) {
+      throw error;
+    }
     createdInstructions.add(instructions);
     return 'session-${createdInstructions.length}';
   }

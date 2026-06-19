@@ -201,12 +201,16 @@ class OnDeviceAi {
       }
     }
 
-    final session = await _api.createSession(instructions ?? '');
-    return OnDeviceAiSession._(
-      hostApi: _api,
-      generationStream: _generationStream,
-      session: session,
-    );
+    try {
+      final session = await _api.createSession(instructions ?? '');
+      return OnDeviceAiSession._(
+        hostApi: _api,
+        generationStream: _generationStream,
+        session: session,
+      );
+    } on PlatformException catch (e, s) {
+      Error.throwWithStackTrace(_mapPlatformException(e), s);
+    }
   }
 
   OnDeviceAiStatus _mapStatus(generated.LocalAiStatusMessage message) {
@@ -300,8 +304,8 @@ class OnDeviceAiSession {
         tokenCount: response.tokenCount,
         durationMs: response.durationMs,
       );
-    } on PlatformException catch (e) {
-      throw _mapPlatformException(e);
+    } on PlatformException catch (e, s) {
+      Error.throwWithStackTrace(_mapPlatformException(e), s);
     }
   }
 
@@ -373,6 +377,7 @@ class OnDeviceAiSession {
       unawaited(
         _api.startStreamingText(_session, prompt, generatedConfig).catchError((
           Object error,
+          StackTrace stackTrace,
         ) {
           if (isClosing) {
             return null;
@@ -381,7 +386,7 @@ class OnDeviceAiSession {
           final mapped = error is PlatformException
               ? _mapPlatformException(error)
               : error;
-          controller.addError(mapped);
+          controller.addError(mapped, stackTrace);
           unawaited(closeStream(cancelSubscription: true));
           return null;
         }),
@@ -418,9 +423,9 @@ class OnDeviceAiSession {
     _isDisposed = true;
     try {
       await _api.disposeSession(_session);
-    } on PlatformException catch (e) {
+    } on PlatformException catch (e, s) {
       _isDisposed = false;
-      throw _mapPlatformException(e);
+      Error.throwWithStackTrace(_mapPlatformException(e), s);
     } catch (_) {
       _isDisposed = false;
       rethrow;
