@@ -321,6 +321,7 @@ void main() {
         final session = await _serviceFor(api).createSession();
 
         await session.generateTextStream(prompt: 'Natural done.').toList();
+        await pumpEventQueue();
 
         expect(api.cancelledStreamSession, isNull);
       },
