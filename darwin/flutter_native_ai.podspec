@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_native_ai'
-  s.version          = '0.4.0'
+  s.version          = '0.4.1'
   s.summary          = 'A Flutter plugin for on-device text generation with native platform AI models.'
   s.description      = <<-DESC
 A Flutter plugin for on-device text generation with native platform AI models.

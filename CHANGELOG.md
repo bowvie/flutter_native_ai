@@ -1,3 +1,14 @@
+## 0.4.1
+
+- Fixes podspec `s.version` to match `pubspec.yaml` version (was frozen at
+    `0.1.1`).
+- Fixes spurious stream cancellation on natural completion: `onCancel` now
+    skips `cancelStreamingText` when the stream is already closing.
+- Fixes Android `ensureReady` to emit a status event on all early-return paths,
+    matching Apple behaviour.
+- Fixes Android generation to share a single ML Kit client across non-streaming
+    and streaming paths instead of creating a duplicate client.
+
 ## 0.4.0
 
 - Replaces `availability()` with `status()` and `OnDeviceAiStatus`, separating
