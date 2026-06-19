@@ -91,6 +91,22 @@ CI runs on `ubuntu-latest` via `.github/workflows/ci.yml` on every push to `main
 
 All five steps must pass before merging. Format and analyze are strict — no warnings are acceptable.
 
+## Release Workflow
+
+1. Bump `version` in `pubspec.yaml` and `s.version` in `darwin/flutter_native_ai.podspec` to the new version (they must always match).
+2. Add a `## <version>` section at the top of `CHANGELOG.md`.
+3. Run `flutter analyze`, `flutter test test`, and `dart pub publish --dry-run` — all must pass.
+4. Commit, open a PR, merge to `main`.
+5. Create a Git tag with **no `v` prefix** — e.g. `0.4.1`, not `v0.4.1`. The `.github/workflows/publish.yml` trigger pattern is `[0-9]+.[0-9]+.[0-9]+`; a `v`-prefixed tag will not match and the publish workflow will not run.
+   ```sh
+   git tag 0.4.1 <commit-sha>
+   git push origin 0.4.1
+   ```
+6. Create the GitHub release targeting that tag:
+   ```sh
+   gh release create 0.4.1 --title "0.4.1" --notes "<changelog content>"
+   ```
+
 ## Development Workflow
 
 ### Adding a new API method
