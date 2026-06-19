@@ -22,6 +22,8 @@ The public API surface is exported from `lib/flutter_native_ai.dart`. Only what 
 
 **Initialization is explicit.** `ensureReady()` may initialize/download a model when the platform supports it. `createSession()` does not initialize by default; callers must pass `initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded` or `always` for just-in-time initialization.
 
+**`ensureReady()` always emits a status snapshot.** On every return path — including early returns for the `NEVER` policy, already-available state, or can't-initialize state — both native bridges call `statusHandler.emit(currentStatus)` before invoking the callback. This ensures callers awaiting a `statusStream()` event after `ensureReady()` are never left hanging. Any future change to `ensureReady()` must preserve this guarantee on all platforms.
+
 **Initialization progress is real or null.** `statusStream()` emits model initialization status snapshots. `initializationProgress` is a nullable `0..100` integer and must only be set from real native progress. Do not synthesize percentages from time, polling count, or guessed phases.
 
 **Stream chunks are cumulative snapshots.** Each chunk contains the full text generated so far, not a delta. If the model emits `"Hello"` then `"Hello world"`, the stream emits both. Consumer UIs should replace, not append.
