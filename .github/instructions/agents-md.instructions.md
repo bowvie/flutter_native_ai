@@ -4,6 +4,7 @@ applyTo:
   - "pigeons/**"
   - "lib/**"
   - "darwin/**/*.swift"
+  - "darwin/**/*.podspec"
   - "android/**/*.kt"
   - "pubspec.yaml"
   - ".github/workflows/ci.yml"
@@ -22,6 +23,7 @@ Update it after any change to:
 - **Public exports** (`lib/flutter_native_ai.dart`) — what is and is not part of the public surface
 - **Native bridges** — platform-specific behaviour, availability logic, session management, concurrency model, or known quirks
 - **Platform support** (`pubspec.yaml` `flutter.plugin.platforms`) — new or removed platform entries
+- **Release artefacts** (`pubspec.yaml` `version`, `darwin/flutter_native_ai.podspec` `s.version`, `CHANGELOG.md`) — version numbers must stay in sync across all three files
 - **CI steps** (`.github/workflows/ci.yml`) — steps agents need to know about before submitting changes
 - **Constraints or invariants** — anything that would cause a bug if an agent assumed the wrong thing (e.g. cumulative stream chunks, single active stream, retryable dispose)
 
