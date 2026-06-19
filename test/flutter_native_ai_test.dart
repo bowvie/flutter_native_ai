@@ -306,6 +306,26 @@ void main() {
       expect(api.generationStreamCancelled, isTrue);
     });
 
+    test(
+      'does not call cancelStreamingText on natural stream completion',
+      () async {
+        final api = _FakeHostApi(
+          streamChunks: [
+            generated.LocalAiStreamChunkMessage(text: 'Hello', isDone: false),
+            generated.LocalAiStreamChunkMessage(
+              text: 'Hello world',
+              isDone: true,
+            ),
+          ],
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await session.generateTextStream(prompt: 'Natural done.').toList();
+
+        expect(api.cancelledStreamSession, isNull);
+      },
+    );
+
     test('closes the generation stream after a native stream error', () async {
       final api = _FakeHostApi(
         streamError: PlatformException(

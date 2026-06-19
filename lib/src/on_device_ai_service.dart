@@ -361,7 +361,9 @@ class OnDeviceAiSession {
 
     // ignore: cascade_invocations
     controller.onCancel = () async {
-      if (isClosing) return; // stream ended naturally; skip redundant cancel
+      if (isClosing) {
+        return; // stream ended naturally; skip redundant cancel
+      }
       await subscription.cancel();
       await _api.cancelStreamingText(_session);
     };
