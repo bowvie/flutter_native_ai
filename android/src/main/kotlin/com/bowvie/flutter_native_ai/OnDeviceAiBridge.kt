@@ -4,6 +4,7 @@ import android.os.SystemClock
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.prompt.Generation
+import com.google.mlkit.genai.prompt.GenerativeModel
 import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.generateContentRequest
 import io.flutter.plugin.common.BinaryMessenger
@@ -40,7 +41,7 @@ private const val MAX_HISTORY_MESSAGES = 20
 class OnDeviceAiBridge : OnDeviceAiHostApi {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val generationClient = Generation.getClient()
-    private val streamHandler = LocalAiGenerationStreamHandler()
+    private val streamHandler = LocalAiGenerationStreamHandler(generationClient)
     private val statusHandler = LocalAiStatusStreamHandler()
     private val sessions = mutableMapOf<String, LocalAiSession>()
     private var initializationJob: Deferred<LocalAiStatusMessage>? = null
@@ -446,9 +447,10 @@ private class LocalAiStatusStreamHandler : StatusStreamStreamHandler() {
     }
 }
 
-private class LocalAiGenerationStreamHandler : GenerationStreamStreamHandler() {
+private class LocalAiGenerationStreamHandler(
+    private val generationClient: GenerativeModel,
+) : GenerationStreamStreamHandler() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val generationClient = Generation.getClient()
     private var sink: PigeonEventSink<LocalAiStreamChunkMessage>? = null
     private val currentJobs = ConcurrentHashMap<String, Job>()
 
