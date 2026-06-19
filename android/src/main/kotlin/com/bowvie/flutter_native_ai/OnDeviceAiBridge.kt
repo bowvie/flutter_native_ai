@@ -298,7 +298,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                 latestStatus = when (status) {
                     is DownloadStatus.DownloadStarted -> {
                         totalBytes = status.bytesToDownload.takeIf { it > 0 }
-                        currentStatus().copy(
+                        latestStatus.copy(
                             isInitializing = true,
                             initializationProgress = null,
                             platformStatus = "downloading",
@@ -311,7 +311,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                                 .coerceIn(0, 100)
                                 .toLong()
                         }
-                        currentStatus().copy(
+                        latestStatus.copy(
                             isInitializing = true,
                             initializationProgress = progress,
                             platformStatus = "downloading",
@@ -327,7 +327,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
                         platformStatus = "available",
                     )
                     is DownloadStatus.DownloadFailed -> initializationFailedStatus(status.e)
-                    else -> currentStatus()
+                    else -> latestStatus
                 }
                 if (
                     status is DownloadStatus.DownloadCompleted ||

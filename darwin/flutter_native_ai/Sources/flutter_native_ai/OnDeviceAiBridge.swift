@@ -303,7 +303,13 @@ final class LocalAiStatusStreamHandler: StatusStreamStreamHandler {
   }
 
   func emit(_ status: LocalAiStatusMessage) {
-    sink?.success(status)
+    if Thread.isMainThread {
+      sink?.success(status)
+    } else {
+      DispatchQueue.main.async { [weak self] in
+        self?.sink?.success(status)
+      }
+    }
   }
 }
 
