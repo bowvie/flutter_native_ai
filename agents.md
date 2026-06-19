@@ -109,7 +109,7 @@ All five steps must pass before merging. Format and analyze are strict — no wa
 ### Releasing a new version
 1. Bump `version:` in `pubspec.yaml`.
 2. Update `s.version` in `darwin/flutter_native_ai.podspec` to the same value — these must always match.
-3. Add a dated entry to `CHANGELOG.md` summarising the changes.
+3. Add an entry to `CHANGELOG.md` under the new version number summarising the changes.
 4. Verify with `dart pub publish --dry-run` before tagging.
 
 ### Adding a new platform
