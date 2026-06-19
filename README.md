@@ -230,3 +230,16 @@ implementation process; the package is not vibe-coded.
 This package is pre-1.0. Apple Foundation Models and Gemini Nano APIs are new and
 may change. The Dart API is intentionally small so platform-specific changes can
 be handled behind the plugin boundary.
+
+## Android Runtime Limits
+
+Android generation runs through ML Kit GenAI and AICore. AICore enforces per-app
+inference quotas, so repeated requests may fail with a busy or quota error. Apps
+should retry with backoff rather than looping immediately.
+
+Android GenAI inference is only allowed while the app is the top foreground app.
+Requests from the background, including foreground services, can be blocked by
+AICore.
+
+Different supported devices may run different Gemini Nano base model versions,
+so output can vary across Android devices.
