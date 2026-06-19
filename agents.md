@@ -95,7 +95,7 @@ All five steps must pass before merging. Format and analyze are strict — no wa
 2. Add a `## <version>` section at the top of `CHANGELOG.md`.
 3. Run `flutter analyze`, `flutter test test`, and `dart pub publish --dry-run` — all must pass.
 4. Commit, open a PR, merge to `main`.
-5. Create a Git tag with **no `v` prefix** — e.g. `0.4.1`, not `v0.4.1`. All existing tags follow this convention. Using `v` breaks pub.dev automated publishing which matches the tag against the bare version string in `pubspec.yaml`.
+5. Create a Git tag with **no `v` prefix** — e.g. `0.4.1`, not `v0.4.1`. The `.github/workflows/publish.yml` trigger pattern is `[0-9]+.[0-9]+.[0-9]+`; a `v`-prefixed tag will not match and the publish workflow will not run.
    ```sh
    git tag 0.4.1 <commit-sha>
    git push origin 0.4.1
