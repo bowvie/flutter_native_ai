@@ -24,7 +24,7 @@ final class PigeonError: Error {
   }
   var localizedDescription: String {
     return
-      "PigeonError(code: \(code), message: \(message ?? "<nil>"), details: \(details ?? "<nil>")"
+      "PigeonError(code: \(code), message: \(message ?? "<nil>"), details: \(details ?? "<nil>"))"
   }
 }
 private func wrapResult(_ result: Any?) -> [Any?] {
