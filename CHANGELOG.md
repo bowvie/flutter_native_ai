@@ -1,3 +1,12 @@
+## Unreleased
+
+- Introduces a typed exception hierarchy (`OnDeviceAiException` and subclasses)
+  so consumers can `catch` specific error types instead of raw
+  `PlatformException`. All errors from the service layer now surface as one of:
+  `OnDeviceAiUnsupportedException`, `OnDeviceAiUnavailableException`,
+  `OnDeviceAiSessionNotFoundException`, `OnDeviceAiGenerationFailedException`,
+  or `OnDeviceAiSessionDisposedException`.
+
 ## 0.4.1
 
 - Fixes podspec `s.version` to match `pubspec.yaml` version (was frozen at

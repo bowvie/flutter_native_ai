@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 import 'generated/on_device_ai.g.dart' as generated;
+import 'on_device_ai_exception.dart';
 
 /// Current host support and model readiness for on-device local AI generation.
 class OnDeviceAiStatus {
@@ -192,22 +193,24 @@ class OnDeviceAi {
     if (initializationPolicy != OnDeviceAiInitializationPolicy.never) {
       final currentStatus = await ensureReady(policy: initializationPolicy);
       if (!currentStatus.isAvailable) {
-        throw PlatformException(
-          code: currentStatus.platformStatus ?? 'local-ai-unavailable',
-          message:
-              currentStatus.reason ??
+        throw OnDeviceAiUnavailableException(
+          currentStatus.reason ??
               'Local AI is not ready for generation on this platform.',
           details: currentStatus.platformStatus,
         );
       }
     }
 
-    final session = await _api.createSession(instructions ?? '');
-    return OnDeviceAiSession._(
-      hostApi: _api,
-      generationStream: _generationStream,
-      session: session,
-    );
+    try {
+      final session = await _api.createSession(instructions ?? '');
+      return OnDeviceAiSession._(
+        hostApi: _api,
+        generationStream: _generationStream,
+        session: session,
+      );
+    } on PlatformException catch (e, s) {
+      Error.throwWithStackTrace(_mapPlatformException(e), s);
+    }
   }
 
   OnDeviceAiStatus _mapStatus(generated.LocalAiStatusMessage message) {
@@ -234,6 +237,26 @@ class OnDeviceAi {
         generated.LocalAiInitializationPolicyMessage.always,
     };
   }
+}
+
+/// Maps a [PlatformException] from the native bridge to a typed [OnDeviceAiException].
+OnDeviceAiException _mapPlatformException(PlatformException e) {
+  return switch (e.code) {
+    'local-ai-unsupported-os' || 'local-ai-framework-unavailable' =>
+      OnDeviceAiUnsupportedException(e.message ?? e.code, details: e.details),
+    'local-ai-unavailable' => OnDeviceAiUnavailableException(
+      e.message ?? e.code,
+      details: e.details,
+    ),
+    'local-ai-session-not-found' => OnDeviceAiSessionNotFoundException(
+      e.message ?? e.code,
+      details: e.details,
+    ),
+    _ => OnDeviceAiGenerationFailedException(
+      e.message ?? e.code,
+      details: e.details,
+    ),
+  };
 }
 
 /// A reusable native local AI model session.
@@ -266,20 +289,24 @@ class OnDeviceAiSession {
     OnDeviceAiGenerationConfig config = const OnDeviceAiGenerationConfig(),
   }) async {
     _ensureActive();
-    final response = await _api.generateText(
-      _session,
-      prompt,
-      generated.LocalAiGenerationConfigMessage(
-        maxTokens: config.maxTokens,
-        temperature: config.temperature,
-      ),
-    );
+    try {
+      final response = await _api.generateText(
+        _session,
+        prompt,
+        generated.LocalAiGenerationConfigMessage(
+          maxTokens: config.maxTokens,
+          temperature: config.temperature,
+        ),
+      );
 
-    return OnDeviceAiGenerationResult(
-      text: response.text,
-      tokenCount: response.tokenCount,
-      durationMs: response.durationMs,
-    );
+      return OnDeviceAiGenerationResult(
+        text: response.text,
+        tokenCount: response.tokenCount,
+        durationMs: response.durationMs,
+      );
+    } on PlatformException catch (e, s) {
+      Error.throwWithStackTrace(_mapPlatformException(e), s);
+    }
   }
 
   /// Streams local AI response snapshots in this session.
@@ -335,7 +362,10 @@ class OnDeviceAiSession {
         },
         onError: (Object error, StackTrace stackTrace) {
           if (!isClosing) {
-            controller.addError(error, stackTrace);
+            final mapped = error is PlatformException
+                ? _mapPlatformException(error)
+                : error;
+            controller.addError(mapped, stackTrace);
             unawaited(closeStream(cancelSubscription: true));
           }
         },
@@ -347,12 +377,16 @@ class OnDeviceAiSession {
       unawaited(
         _api.startStreamingText(_session, prompt, generatedConfig).catchError((
           Object error,
+          StackTrace stackTrace,
         ) {
           if (isClosing) {
             return null;
           }
 
-          controller.addError(error);
+          final mapped = error is PlatformException
+              ? _mapPlatformException(error)
+              : error;
+          controller.addError(mapped, stackTrace);
           unawaited(closeStream(cancelSubscription: true));
           return null;
         }),
@@ -389,6 +423,9 @@ class OnDeviceAiSession {
     _isDisposed = true;
     try {
       await _api.disposeSession(_session);
+    } on PlatformException catch (e, s) {
+      _isDisposed = false;
+      Error.throwWithStackTrace(_mapPlatformException(e), s);
     } catch (_) {
       _isDisposed = false;
       rethrow;
@@ -397,7 +434,9 @@ class OnDeviceAiSession {
 
   void _ensureActive() {
     if (_isDisposed) {
-      throw StateError('This OnDeviceAiSession has been disposed.');
+      throw const OnDeviceAiSessionDisposedException(
+        'This OnDeviceAiSession has been disposed.',
+      );
     }
   }
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_native_ai/src/generated/on_device_ai.g.dart'
     as generated;
+import 'package:flutter_native_ai/src/on_device_ai_exception.dart';
 import 'package:flutter_native_ai/src/on_device_ai_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -215,12 +216,35 @@ void main() {
             initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded,
           ),
           throwsA(
-            isA<PlatformException>()
-                .having((error) => error.code, 'code', 'blocked')
-                .having((error) => error.message, 'message', 'Model blocked.'),
+            isA<OnDeviceAiUnavailableException>()
+                .having((e) => e.message, 'message', 'Model blocked.')
+                .having((e) => e.details, 'details', 'blocked'),
           ),
         );
         expect(api.createdInstructions, isEmpty);
+      },
+    );
+
+    test(
+      'maps PlatformException from createSession to a typed exception',
+      () async {
+        final api = _FakeHostApi(
+          createSessionError: PlatformException(
+            code: 'local-ai-unavailable',
+            message: 'Model not ready.',
+            details: 'downloadable',
+          ),
+        );
+        final service = _serviceFor(api);
+
+        await expectLater(
+          service.createSession(),
+          throwsA(
+            isA<OnDeviceAiUnavailableException>()
+                .having((e) => e.message, 'message', 'Model not ready.')
+                .having((e) => e.details, 'details', 'downloadable'),
+          ),
+        );
       },
     );
   });
@@ -338,7 +362,7 @@ void main() {
 
       await expectLater(
         session.generateTextStream(prompt: 'Fail from stream.').toList(),
-        throwsA(isA<PlatformException>()),
+        throwsA(isA<OnDeviceAiGenerationFailedException>()),
       );
       expect(api.generationStreamCancelled, isTrue);
     });
@@ -381,7 +405,7 @@ void main() {
 
         await expectLater(
           session.generateTextStream(prompt: 'Fail to start.').toList(),
-          throwsA(isA<PlatformException>()),
+          throwsA(isA<OnDeviceAiGenerationFailedException>()),
         );
         expect(api.generationStreamCancelled, isTrue);
       },
@@ -442,7 +466,10 @@ void main() {
       );
       final session = await _serviceFor(api).createSession();
 
-      await expectLater(session.dispose(), throwsA(isA<PlatformException>()));
+      await expectLater(
+        session.dispose(),
+        throwsA(isA<OnDeviceAiGenerationFailedException>()),
+      );
       expect(session.isDisposed, isFalse);
 
       api.disposeError = null;
@@ -458,14 +485,159 @@ void main() {
 
       expect(
         () => session.generateText(prompt: 'Nope.'),
-        throwsA(isA<StateError>()),
+        throwsA(isA<OnDeviceAiSessionDisposedException>()),
       );
       expect(
         () => session.generateTextStream(prompt: 'Nope.'),
-        throwsA(isA<StateError>()),
+        throwsA(isA<OnDeviceAiSessionDisposedException>()),
       );
-      expect(() => session.cancelStreamingText(), throwsA(isA<StateError>()));
+      expect(
+        () => session.cancelStreamingText(),
+        throwsA(isA<OnDeviceAiSessionDisposedException>()),
+      );
     });
+  });
+
+  group('exception mapping', () {
+    test(
+      'maps local-ai-unsupported-os to OnDeviceAiUnsupportedException',
+      () async {
+        final api = _FakeHostApi(
+          generationError: PlatformException(
+            code: 'local-ai-unsupported-os',
+            message: 'OS too old.',
+          ),
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await expectLater(
+          session.generateText(prompt: 'Test.'),
+          throwsA(
+            isA<OnDeviceAiUnsupportedException>().having(
+              (e) => e.message,
+              'message',
+              'OS too old.',
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'maps local-ai-framework-unavailable to OnDeviceAiUnsupportedException',
+      () async {
+        final api = _FakeHostApi(
+          generationError: PlatformException(
+            code: 'local-ai-framework-unavailable',
+            message: 'Framework missing.',
+          ),
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await expectLater(
+          session.generateText(prompt: 'Test.'),
+          throwsA(isA<OnDeviceAiUnsupportedException>()),
+        );
+      },
+    );
+
+    test(
+      'maps local-ai-unavailable to OnDeviceAiUnavailableException',
+      () async {
+        final api = _FakeHostApi(
+          generationError: PlatformException(
+            code: 'local-ai-unavailable',
+            message: 'Model not ready.',
+            details: 'downloadable',
+          ),
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await expectLater(
+          session.generateText(prompt: 'Test.'),
+          throwsA(
+            isA<OnDeviceAiUnavailableException>()
+                .having((e) => e.message, 'message', 'Model not ready.')
+                .having((e) => e.details, 'details', 'downloadable'),
+          ),
+        );
+      },
+    );
+
+    test(
+      'maps local-ai-session-not-found to OnDeviceAiSessionNotFoundException',
+      () async {
+        final api = _FakeHostApi(
+          generationError: PlatformException(
+            code: 'local-ai-session-not-found',
+            message: 'Session gone.',
+          ),
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await expectLater(
+          session.generateText(prompt: 'Test.'),
+          throwsA(isA<OnDeviceAiSessionNotFoundException>()),
+        );
+      },
+    );
+
+    test(
+      'maps local-ai-generation-failed to OnDeviceAiGenerationFailedException',
+      () async {
+        final api = _FakeHostApi(
+          generationError: PlatformException(
+            code: 'local-ai-generation-failed',
+            message: 'Generation error.',
+          ),
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await expectLater(
+          session.generateText(prompt: 'Test.'),
+          throwsA(isA<OnDeviceAiGenerationFailedException>()),
+        );
+      },
+    );
+
+    test(
+      'unknown codes fall back to OnDeviceAiGenerationFailedException',
+      () async {
+        final api = _FakeHostApi(
+          generationError: PlatformException(
+            code: 'some-unknown-code',
+            message: 'Unknown error.',
+          ),
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await expectLater(
+          session.generateText(prompt: 'Test.'),
+          throwsA(isA<OnDeviceAiGenerationFailedException>()),
+        );
+      },
+    );
+
+    test(
+      'uses error code as message when PlatformException message is null',
+      () async {
+        final api = _FakeHostApi(
+          generationError: PlatformException(code: 'local-ai-unavailable'),
+        );
+        final session = await _serviceFor(api).createSession();
+
+        await expectLater(
+          session.generateText(prompt: 'Test.'),
+          throwsA(
+            isA<OnDeviceAiUnavailableException>().having(
+              (e) => e.message,
+              'message',
+              'local-ai-unavailable',
+            ),
+          ),
+        );
+      },
+    );
   });
 }
 
@@ -476,10 +648,12 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
     this.ensureReadyResponse,
     this.statusChunks = const [],
     this.generationResponse,
+    this.generationError,
     this.streamChunks = const [],
     this.streamError,
     this.startStreamError,
     this.disposeError,
+    this.createSessionError,
   });
 
   final generated.LocalAiStatusMessage? statusResponse;
@@ -487,10 +661,12 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
   final generated.LocalAiStatusMessage? ensureReadyResponse;
   final List<generated.LocalAiStatusMessage> statusChunks;
   final generated.LocalAiGenerationResponseMessage? generationResponse;
+  final Exception? generationError;
   final List<generated.LocalAiStreamChunkMessage> streamChunks;
   final Exception? streamError;
   final Exception? startStreamError;
   Exception? disposeError;
+  final Exception? createSessionError;
 
   final ensureReadyPolicies = <generated.LocalAiInitializationPolicyMessage>[];
   final createdInstructions = <String>[];
@@ -531,6 +707,10 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
 
   @override
   Future<String> createSession(String instructions) async {
+    final error = createSessionError;
+    if (error != null) {
+      throw error;
+    }
     createdInstructions.add(instructions);
     return 'session-${createdInstructions.length}';
   }
@@ -553,6 +733,10 @@ class _FakeHostApi extends generated.OnDeviceAiHostApi {
     lastSession = session;
     lastPrompt = prompt;
     lastConfig = config;
+    final error = generationError;
+    if (error != null) {
+      throw error;
+    }
     return generationResponse ??
         generated.LocalAiGenerationResponseMessage(text: 'Generated response');
   }
