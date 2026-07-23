@@ -1,3 +1,8 @@
+## 0.5.1
+
+- Updates Android ML Kit Prompt API to `1.0.0-beta4` for Gemini Nano v4
+  compatibility, including upstream streaming fixes.
+
 ## 0.5.0
 
 - Introduces a typed exception hierarchy (`OnDeviceAiException` and subclasses)
