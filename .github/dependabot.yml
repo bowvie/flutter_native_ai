@@ -4,8 +4,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+      day: friday
+      time: "09:00"
+      timezone: Europe/Amsterdam
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: friday
+      time: "09:00"
+      timezone: Europe/Amsterdam
