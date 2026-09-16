@@ -22,7 +22,7 @@ The public API surface is exported from `lib/flutter_native_ai.dart`. Only what 
 
 **Initialization is explicit.** `ensureReady()` may initialize/download a model when the platform supports it. `createSession()` does not initialize by default; callers must pass `initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded` or `always` for just-in-time initialization.
 
-**`ensureReady()` always emits a status snapshot.** On every return path — including early returns for the `NEVER` policy, already-available state, or can't-initialize state — both native bridges call `statusHandler.emit(currentStatus)` before invoking the callback. This ensures callers awaiting a `statusStream()` event after `ensureReady()` are never left hanging. Any future change to `ensureReady()` must preserve this guarantee on all platforms.
+**`ensureReady()` always emits a status snapshot.** On every return path — including early returns for the `NEVER` policy, already-available state, or can't-initialize state — both native bridges call `statusHandler.emit(currentStatus)` before returning. This ensures callers awaiting a `statusStream()` event after `ensureReady()` are never left hanging. Any future change to `ensureReady()` must preserve this guarantee on all platforms.
 
 **Initialization progress is real or null.** `statusStream()` emits model initialization status snapshots. `initializationProgress` is a nullable `0..100` integer and must only be set from real native progress. Do not synthesize percentages from time, polling count, or guessed phases.
 
@@ -47,7 +47,7 @@ dart format lib/src/generated/on_device_ai.g.dart pigeons/on_device_ai.dart
 
 The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_native_ai/OnDeviceAi.g.swift`, where it is shared by both CocoaPods and Swift Package Manager. The Kotlin binding goes to `android/src/main/kotlin/com/bowvie/flutter_native_ai/OnDeviceAi.g.kt`.
 
-**Host methods are `@asyncCallback`.** Since Pigeon 28, `@async` generates `suspend` (Kotlin) and `async throws` (Swift) signatures. The bridges are written against callback signatures, so host methods in the contract must stay `@asyncCallback`.
+**Host methods are `@async`.** Since Pigeon 28, `@async` generates `suspend` (Kotlin) and `async throws` (Swift) signatures, and both bridges implement those directly: `override suspend fun` in `OnDeviceAiBridge.kt` and `func … async throws` in `OnDeviceAiBridge.swift`. Return values are returned; failures are thrown as `FlutterError` (Kotlin) or `PigeonError` (Swift) with the error codes `_mapPlatformException` expects. The generated wrappers dispatch each call on `CoroutineScope(Dispatchers.Main).launch` (Kotlin) and `Task { @MainActor in … }` (Swift), so a call starts on the main thread and leaves it at the first suspension: keep heavy work off the main thread and do not assume shared bridge state is still main-thread confined.
 
 **Known Pigeon quirk:** Pigeon emits `open fun` modifiers in the generated Kotlin event-channel wrapper. The local lint configuration rejects `open fun`. Remove those modifiers from the checked-in Kotlin binding after regeneration.
 
@@ -59,7 +59,7 @@ The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_nativ
 - Runtime status maps `SystemLanguageModel.default.availability` into `LocalAiStatusMessage`.
 - `ensureReady()` is an immediate status refresh on Apple. Foundation Models does not expose an app-triggered download path today.
 - Sessions are stored as `[String: Any]` keyed by a UUID string. Type-cast to `LocalAiSession` when retrieved.
-- Streaming uses `LanguageModelSession.streamResponse`. Foundation Models itself emits cumulative snapshots: each `snapshot.content` is the full text generated so far. The bridge assigns `latestText = snapshot.content` and forwards it directly — no manual accumulation needed on the Apple side.
+- Streaming uses `LanguageModelSession.streamResponse`. Foundation Models itself emits cumulative snapshots: each `snapshot.content` is the full text generated so far. The bridge binds each `snapshot.content` to a `let` per iteration and forwards it directly — no manual accumulation needed on the Apple side, and no mutable local is read from concurrently-executing code.
 - The shared Darwin source package lives under `darwin/flutter_native_ai`. Both CocoaPods (`darwin/flutter_native_ai.podspec`) and Swift Package Manager (`darwin/flutter_native_ai/Package.swift`) consume it.
 
 ### Android
@@ -68,7 +68,7 @@ The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_nativ
 - `ensureReady()` uses `GenerativeModel.download()` for Android model download/provisioning when the model is downloadable or already downloading.
 - Android initialization progress comes from ML Kit `DownloadStatus`: `DownloadStarted.bytesToDownload`, `DownloadProgress.totalBytesDownloaded`, `DownloadCompleted`, and `DownloadFailed`. Compute `initializationProgress` only when real byte progress is available; emit `100` on completion.
 - `LocalAiSession` manually simulates conversation history by composing a text prompt that includes instructions, previous turns (user + assistant), and the new user request. History is capped at 20 messages.
-- The bridge runs on a `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)`. Background work dispatches to `Dispatchers.Default`. Stream handler runs on its own `CoroutineScope(Dispatchers.Default)`.
+- Host methods are `suspend` functions, so each call runs in the coroutine the generated wrapper starts. The bridge's own `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)` only owns work that must outlive a single call — the `ensureReady` download `Deferred` — and `close()` cancels it. Background work dispatches to `Dispatchers.Default`. Stream handler runs on its own `CoroutineScope(Dispatchers.Default)`.
 - `maxOutputTokens` is clamped to `[1, 256]`. The default when not specified is 160.
 - Cancellation emits a terminal chunk with `isDone = true` in a `NonCancellable` context so Dart listeners complete deterministically.
 - Call `OnDeviceAiBridge.close()` during plugin detach to cancel all coroutines.
