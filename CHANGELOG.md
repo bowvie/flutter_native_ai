@@ -1,3 +1,11 @@
+## 0.5.2
+
+- Regenerates the Dart, Kotlin, and Swift bindings with Pigeon 29. Host API
+    methods now use `@asyncCallback` so the native bridges keep their existing
+    callback signatures after Pigeon 28 changed `@async` to generate
+    `suspend`/`async` functions by default.
+- Updates Android `kotlinx-coroutines-android` to `1.11.0`.
+
 ## 0.5.1
 
 - Updates Android ML Kit Prompt API to `1.0.0-beta4` for Gemini Nano v4

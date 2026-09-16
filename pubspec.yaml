@@ -1,6 +1,6 @@
 name: flutter_native_ai
 description: A Flutter plugin for native on-device generative AI through Apple Foundation Models and Android Gemini Nano.
-version: 0.5.1
+version: 0.5.2
 homepage: https://github.com/bowvie/flutter_native_ai
 repository: https://github.com/bowvie/flutter_native_ai
 issue_tracker: https://github.com/bowvie/flutter_native_ai/issues
@@ -24,7 +24,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  pigeon: ">=27.1.0 <30.0.0"
+  pigeon: ">=28.0.0 <30.0.0"
 
 flutter:
   plugin:
