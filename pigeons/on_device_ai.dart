@@ -118,23 +118,23 @@ class LocalAiStreamChunkMessage {
 @HostApi()
 abstract class OnDeviceAiHostApi {
   /// Checks the current device, OS, and model readiness.
-  @async
+  @asyncCallback
   LocalAiStatusMessage status();
 
   /// Ensures the native model is ready according to [policy].
-  @async
+  @asyncCallback
   LocalAiStatusMessage ensureReady(LocalAiInitializationPolicyMessage policy);
 
   /// Creates a native model session.
-  @async
+  @asyncCallback
   String createSession(String instructions);
 
   /// Releases the native resources associated with [session].
-  @async
+  @asyncCallback
   void disposeSession(String session);
 
   /// Generates a complete response for [prompt] in [session].
-  @async
+  @asyncCallback
   LocalAiGenerationResponseMessage generateText(
     String session,
     String prompt,
@@ -142,7 +142,7 @@ abstract class OnDeviceAiHostApi {
   );
 
   /// Starts an asynchronous streaming response for [prompt] in [session].
-  @async
+  @asyncCallback
   void startStreamingText(
     String session,
     String prompt,
@@ -150,7 +150,7 @@ abstract class OnDeviceAiHostApi {
   );
 
   /// Cancels the active streaming response for [session].
-  @async
+  @asyncCallback
   void cancelStreamingText(String session);
 }
 

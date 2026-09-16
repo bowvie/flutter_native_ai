@@ -47,6 +47,8 @@ dart format lib/src/generated/on_device_ai.g.dart pigeons/on_device_ai.dart
 
 The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_native_ai/OnDeviceAi.g.swift`, where it is shared by both CocoaPods and Swift Package Manager. The Kotlin binding goes to `android/src/main/kotlin/com/bowvie/flutter_native_ai/OnDeviceAi.g.kt`.
 
+**Host methods are `@asyncCallback`.** Since Pigeon 28, `@async` generates `suspend` (Kotlin) and `async throws` (Swift) signatures. The bridges are written against callback signatures, so host methods in the contract must stay `@asyncCallback`.
+
 **Known Pigeon quirk:** Pigeon emits `open fun` modifiers in the generated Kotlin event-channel wrapper. The local lint configuration rejects `open fun`. Remove those modifiers from the checked-in Kotlin binding after regeneration.
 
 ## Platform Notes
