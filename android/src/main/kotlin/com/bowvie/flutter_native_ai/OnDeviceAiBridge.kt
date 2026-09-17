@@ -128,9 +128,10 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         return session
     }
 
-    override suspend fun disposeSession(session: String) {
+    override suspend fun disposeSession(session: String) = hostCall {
         streamHandler.cancel(session)
         sessions.remove(session)
+        Unit
     }
 
     override suspend fun generateText(
@@ -216,7 +217,7 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         )
     }
 
-    override suspend fun cancelStreamingText(session: String) {
+    override suspend fun cancelStreamingText(session: String) = hostCall {
         streamHandler.cancel(session)
     }
 

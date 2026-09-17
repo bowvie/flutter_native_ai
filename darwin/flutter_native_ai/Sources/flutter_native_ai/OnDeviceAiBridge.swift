@@ -376,12 +376,15 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       // Streaming chunks share a single event channel without a session id, so
       // only one generation may stream at a time per plugin instance. Cancel
       // any in-flight stream (for this or another session) before starting.
-      cancelAll()
+      // Replacement happens under one lock so concurrent starts cannot both
+      // survive.
       let temperature = config.temperature
       let maximumResponseTokens = config.maxTokens.map(Int.init)
 
       let taskID = UUID()
       tasksLock.lock()
+      let replacedTasks = currentTasks.values.map(\.task)
+      currentTasks.removeAll()
       let task = Task.detached(priority: .userInitiated) { [weak self] in
         do {
           let options = GenerationOptions(
@@ -415,6 +418,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       }
       currentTasks[session] = (id: taskID, task: task)
       tasksLock.unlock()
+      replacedTasks.forEach { $0.cancel() }
     }
 
     /// Drops the finished task entry unless a newer stream already replaced it.
