@@ -57,7 +57,7 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
     policy: LocalAiInitializationPolicyMessage
   ) async throws -> LocalAiStatusMessage {
     let status = currentStatus()
-    statusHandler.emit(status)
+    await statusHandler.emit(status)
     return status
   }
 
@@ -298,14 +298,10 @@ final class LocalAiStatusStreamHandler: StatusStreamStreamHandler {
     sink = nil
   }
 
+  /// Awaitable so `ensureReady` returns only after the snapshot is delivered.
+  @MainActor
   func emit(_ status: LocalAiStatusMessage) {
-    if Thread.isMainThread {
-      sink?.success(status)
-    } else {
-      DispatchQueue.main.async { [weak self] in
-        self?.sink?.success(status)
-      }
-    }
+    sink?.success(status)
   }
 }
 
@@ -320,12 +316,14 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
 
   #if canImport(FoundationModels)
     private let tasksLock = NSLock()
-    // The id lets a finishing task clear only its own entry, never the entry
-    // of a stream that replaced it.
-    private var currentTasks: [String: (id: UUID, task: Task<Void, Never>)] = [:]
-    // Tasks replaced by a newer stream. The event channel carries no stream
-    // id, so anything they emit would land in the new stream's listener.
-    private var supersededTaskIDs: Set<UUID> = []
+    // The generation lets a finishing task clear only its own entry, never
+    // the entry of a stream that replaced it.
+    private var currentTasks: [String: (generation: UInt64, task: Task<Void, Never>)] = [:]
+    // Bumped by every `start`. The event channel carries no stream id, so only
+    // the latest generation may emit; anything older would land in the new
+    // stream's listener. An explicit cancel does not bump it, so a cancelled
+    // stream still delivers its terminal chunk.
+    private var streamGeneration: UInt64 = 0
   #endif
 
   /// Stores the active event sink for later generation chunks.
@@ -384,10 +382,10 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       let temperature = config.temperature
       let maximumResponseTokens = config.maxTokens.map(Int.init)
 
-      let taskID = UUID()
       tasksLock.lock()
+      streamGeneration += 1
+      let generation = streamGeneration
       let replacedTasks = currentTasks.values.map(\.task)
-      supersededTaskIDs.formUnion(currentTasks.values.map(\.id))
       currentTasks.removeAll()
       let task = Task.detached(priority: .userInitiated) { [weak self] in
         do {
@@ -407,43 +405,42 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
             // argument keeps a mutable local out of concurrently-executing code.
             let snapshotText = snapshot.content
             latestText = snapshotText
-            await self?.sendChunk(text: snapshotText, isDone: false, taskID: taskID)
+            await self?.sendChunk(text: snapshotText, isDone: false, generation: generation)
           }
 
           let finalText = latestText
-          await self?.sendChunk(text: finalText, isDone: true, taskID: taskID)
+          await self?.sendChunk(text: finalText, isDone: true, generation: generation)
         } catch is CancellationError {
-          await self?.sendChunk(text: "", isDone: true, taskID: taskID)
+          await self?.sendChunk(text: "", isDone: true, generation: generation)
         } catch {
-          await self?.sendError(error, taskID: taskID)
+          await self?.sendError(error, generation: generation)
         }
 
-        self?.clearTask(session: session, id: taskID)
+        self?.clearTask(session: session, generation: generation)
       }
-      currentTasks[session] = (id: taskID, task: task)
+      currentTasks[session] = (generation: generation, task: task)
       tasksLock.unlock()
       replacedTasks.forEach { $0.cancel() }
     }
 
     /// Drops the finished task entry unless a newer stream already replaced it.
-    fileprivate func clearTask(session: String, id: UUID) {
+    fileprivate func clearTask(session: String, generation: UInt64) {
       tasksLock.lock()
       defer { tasksLock.unlock() }
-      if currentTasks[session]?.id == id {
+      if currentTasks[session]?.generation == generation {
         currentTasks[session] = nil
       }
-      supersededTaskIDs.remove(id)
     }
   #endif
 
-  /// Delivers [chunk] unless the emitting task was superseded. The lock is
-  /// held across the send so `start` cannot supersede the task in between.
+  /// Delivers [chunk] unless a newer stream has started. The lock is held
+  /// across the send so `start` cannot supersede the task in between.
   @MainActor
-  private func deliver(_ chunk: LocalAiStreamChunkMessage, taskID: UUID) {
+  private func deliver(_ chunk: LocalAiStreamChunkMessage, generation: UInt64) {
     #if canImport(FoundationModels)
       tasksLock.lock()
       defer { tasksLock.unlock() }
-      if supersededTaskIDs.contains(taskID) {
+      if generation != streamGeneration {
         return
       }
     #endif
@@ -452,7 +449,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
 
   /// Sends a text snapshot to Dart on the main actor.
   @MainActor
-  private func sendChunk(text: String, isDone: Bool, taskID: UUID) {
+  private func sendChunk(text: String, isDone: Bool, generation: UInt64) {
     deliver(
       LocalAiStreamChunkMessage(
         text: text,
@@ -460,13 +457,13 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
         errorCode: nil,
         errorMessage: nil
       ),
-      taskID: taskID
+      generation: generation
     )
   }
 
   /// Encodes generation failures as a terminal stream chunk.
   @MainActor
-  private func sendError(_ error: Error, taskID: UUID) {
+  private func sendError(_ error: Error, generation: UInt64) {
     deliver(
       LocalAiStreamChunkMessage(
         text: "",
@@ -474,7 +471,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
         errorCode: "local-ai-generation-failed",
         errorMessage: error.localizedDescription
       ),
-      taskID: taskID
+      generation: generation
     )
   }
 }

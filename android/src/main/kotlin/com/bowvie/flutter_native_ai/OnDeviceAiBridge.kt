@@ -453,10 +453,11 @@ private class LocalAiGenerationStreamHandler(
     private var sink: PigeonEventSink<LocalAiStreamChunkMessage>? = null
     private val currentJobs = ConcurrentHashMap<String, Job>()
 
-    // Jobs replaced by a newer stream. The event channel carries no stream id,
-    // so anything they emit would land in the new stream's listener. Only
-    // touched on the main thread.
-    private val supersededJobs = mutableSetOf<Job>()
+    // Bumped by every start(). The event channel carries no stream id, so only
+    // the latest generation may emit; anything older would land in the new
+    // stream's listener. An explicit cancel does not bump it, so a cancelled
+    // stream still delivers its terminal chunk. Main thread only.
+    private var streamGeneration = 0L
 
     override fun onListen(p0: Any?, sink: PigeonEventSink<LocalAiStreamChunkMessage>) {
         this.sink = sink
@@ -476,12 +477,10 @@ private class LocalAiGenerationStreamHandler(
         // Streaming chunks share a single event channel without a session id, so
         // only one generation may stream at a time per plugin instance. Cancel
         // any in-flight stream (for this or another session) before starting.
-        supersededJobs.removeAll { it.isCompleted }
-        supersededJobs.addAll(currentJobs.values)
+        val generation = ++streamGeneration
         cancelAll()
 
         currentJobs[session] = scope.launch {
-            val job = coroutineContext[Job]!!
             val latestText = StringBuilder()
             try {
                 generationClient.generateContentStream(
@@ -489,7 +488,7 @@ private class LocalAiGenerationStreamHandler(
                 ).collect { chunk ->
                     latestText.append(chunk.candidates.firstOrNull()?.text.orEmpty())
                     emit(
-                        job,
+                        generation,
                         LocalAiStreamChunkMessage(
                             text = latestText.toString(),
                             isDone = false,
@@ -498,7 +497,7 @@ private class LocalAiGenerationStreamHandler(
                 }
 
                 emit(
-                    job,
+                    generation,
                     LocalAiStreamChunkMessage(
                         text = latestText.toString(),
                         isDone = true,
@@ -509,10 +508,10 @@ private class LocalAiGenerationStreamHandler(
                 // Cancellation can be initiated natively (e.g. disposeSession).
                 // Emit a terminal chunk in a non-cancellable context so the
                 // active Dart listener completes deterministically instead of
-                // hanging. A superseded job is filtered out in emit().
+                // hanging. A superseded stream is filtered out in emit().
                 withContext(NonCancellable) {
                     emit(
-                        job,
+                        generation,
                         LocalAiStreamChunkMessage(
                             text = latestText.toString(),
                             isDone = true,
@@ -521,7 +520,7 @@ private class LocalAiGenerationStreamHandler(
                 }
             } catch (error: Throwable) {
                 emit(
-                    job,
+                    generation,
                     LocalAiStreamChunkMessage(
                         text = latestText.toString(),
                         isDone = true,
@@ -530,7 +529,7 @@ private class LocalAiGenerationStreamHandler(
                     ),
                 )
             } finally {
-                currentJobs.remove(session, job)
+                currentJobs.remove(session, coroutineContext[Job])
             }
         }
     }
@@ -550,9 +549,9 @@ private class LocalAiGenerationStreamHandler(
         sink = null
     }
 
-    private suspend fun emit(job: Job, chunk: LocalAiStreamChunkMessage) {
+    private suspend fun emit(generation: Long, chunk: LocalAiStreamChunkMessage) {
         withContext(Dispatchers.Main.immediate) {
-            if (job !in supersededJobs) {
+            if (generation == streamGeneration) {
                 sink?.success(chunk)
             }
         }
