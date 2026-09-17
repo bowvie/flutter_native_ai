@@ -39,7 +39,7 @@ private const val MAX_HISTORY_MESSAGES = 20
  * snapshots to match the iOS Foundation Models bridge.
  */
 class OnDeviceAiBridge : OnDeviceAiHostApi {
-    /** Owns work that outlives a single host call, such as the download job. */
+    /** Owns every host call and the download job; cancelled by [close]. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val generationClient = Generation.getClient()
     private val streamHandler = LocalAiGenerationStreamHandler(generationClient)
@@ -52,11 +52,23 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         StatusStreamStreamHandler.register(messenger, statusHandler)
     }
 
-    override suspend fun status(): LocalAiStatusMessage {
-        return withContext(Dispatchers.Default) { currentStatus() }
+    /**
+     * Runs a host call on the bridge scope. Pigeon launches each call in its
+     * own unowned scope, which [close] could not otherwise cancel on detach.
+     */
+    private suspend fun <T> hostCall(block: suspend CoroutineScope.() -> T): T {
+        return scope.async(block = block).await()
+    }
+
+    override suspend fun status(): LocalAiStatusMessage = hostCall {
+        withContext(Dispatchers.Default) { currentStatus() }
     }
 
     override suspend fun ensureReady(
+        policy: LocalAiInitializationPolicyMessage,
+    ): LocalAiStatusMessage = hostCall { ensureReadyOnScope(policy) }
+
+    private suspend fun ensureReadyOnScope(
         policy: LocalAiInitializationPolicyMessage,
     ): LocalAiStatusMessage {
         try {
@@ -99,7 +111,11 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         }
     }
 
-    override suspend fun createSession(instructions: String): String {
+    override suspend fun createSession(instructions: String): String = hostCall {
+        createSessionOnScope(instructions)
+    }
+
+    private suspend fun createSessionOnScope(instructions: String): String {
         val status = withContext(Dispatchers.Default) {
             currentStatus()
         }
@@ -118,6 +134,14 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
     }
 
     override suspend fun generateText(
+        session: String,
+        prompt: String,
+        config: LocalAiGenerationConfigMessage,
+    ): LocalAiGenerationResponseMessage = hostCall {
+        generateTextOnScope(session, prompt, config)
+    }
+
+    private suspend fun generateTextOnScope(
         session: String,
         prompt: String,
         config: LocalAiGenerationConfigMessage,
@@ -165,6 +189,12 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
     }
 
     override suspend fun startStreamingText(
+        session: String,
+        prompt: String,
+        config: LocalAiGenerationConfigMessage,
+    ) = hostCall { startStreamingTextOnScope(session, prompt, config) }
+
+    private suspend fun startStreamingTextOnScope(
         session: String,
         prompt: String,
         config: LocalAiGenerationConfigMessage,

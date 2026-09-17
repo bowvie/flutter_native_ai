@@ -320,7 +320,9 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
 
   #if canImport(FoundationModels)
     private let tasksLock = NSLock()
-    private var currentTasks: [String: Task<Void, Never>] = [:]
+    // The id lets a finishing task clear only its own entry, never the entry
+    // of a stream that replaced it.
+    private var currentTasks: [String: (id: UUID, task: Task<Void, Never>)] = [:]
   #endif
 
   /// Stores the active event sink for later generation chunks.
@@ -342,9 +344,9 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
         tasksLock.lock()
-        let task = currentTasks.removeValue(forKey: session)
+        let entry = currentTasks.removeValue(forKey: session)
         tasksLock.unlock()
-        task?.cancel()
+        entry?.task.cancel()
       }
     #endif
   }
@@ -354,7 +356,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
         tasksLock.lock()
-        let tasks = Array(currentTasks.values)
+        let tasks = currentTasks.values.map(\.task)
         currentTasks.removeAll()
         tasksLock.unlock()
         tasks.forEach { $0.cancel() }
@@ -378,8 +380,9 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       let temperature = config.temperature
       let maximumResponseTokens = config.maxTokens.map(Int.init)
 
+      let taskID = UUID()
       tasksLock.lock()
-      currentTasks[session] = Task.detached(priority: .userInitiated) { [weak self] in
+      let task = Task.detached(priority: .userInitiated) { [weak self] in
         do {
           let options = GenerationOptions(
             temperature: temperature,
@@ -408,16 +411,19 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
           await self?.sendError(error)
         }
 
-        self?.clearTask(session: session)
+        self?.clearTask(session: session, id: taskID)
       }
+      currentTasks[session] = (id: taskID, task: task)
       tasksLock.unlock()
     }
 
-    /// Drops the finished task entry.
-    fileprivate func clearTask(session: String) {
+    /// Drops the finished task entry unless a newer stream already replaced it.
+    fileprivate func clearTask(session: String, id: UUID) {
       tasksLock.lock()
       defer { tasksLock.unlock() }
-      currentTasks[session] = nil
+      if currentTasks[session]?.id == id {
+        currentTasks[session] = nil
+      }
     }
   #endif
 
