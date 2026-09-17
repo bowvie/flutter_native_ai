@@ -336,6 +336,13 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
 
   /// Cancels generation and clears the event sink when Dart stops listening.
   override func onCancel(withArguments arguments: Any?) {
+    #if canImport(FoundationModels)
+      // The listener is gone; its stream's terminal chunk must not reach a
+      // listener that attaches next.
+      tasksLock.lock()
+      streamGeneration += 1
+      tasksLock.unlock()
+    #endif
     cancelAll()
     sink = nil
   }

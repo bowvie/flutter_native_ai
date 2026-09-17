@@ -464,6 +464,9 @@ private class LocalAiGenerationStreamHandler(
     }
 
     override fun onCancel(p0: Any?) {
+        // The listener is gone; its stream's terminal chunk must not reach a
+        // listener that attaches next.
+        streamGeneration++
         cancelAll()
         sink = null
     }
