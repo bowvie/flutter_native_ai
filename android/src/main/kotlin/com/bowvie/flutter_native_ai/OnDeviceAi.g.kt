@@ -13,6 +13,12 @@ import io.flutter.plugin.common.StandardMethodCodec
 import io.flutter.plugin.common.StandardMessageCodec
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 private object OnDeviceAiPigeonUtils {
 
   fun wrapResult(result: Any?): List<Any?> {
@@ -503,19 +509,19 @@ val OnDeviceAiPigeonMethodCodec = StandardMethodCodec(OnDeviceAiPigeonCodec())
  */
 interface OnDeviceAiHostApi {
   /** Checks the current device, OS, and model readiness. */
-  fun status(callback: (Result<LocalAiStatusMessage>) -> Unit)
+  suspend fun status(): LocalAiStatusMessage
   /** Ensures the native model is ready according to [policy]. */
-  fun ensureReady(policy: LocalAiInitializationPolicyMessage, callback: (Result<LocalAiStatusMessage>) -> Unit)
+  suspend fun ensureReady(policy: LocalAiInitializationPolicyMessage): LocalAiStatusMessage
   /** Creates a native model session. */
-  fun createSession(instructions: String, callback: (Result<String>) -> Unit)
+  suspend fun createSession(instructions: String): String
   /** Releases the native resources associated with [session]. */
-  fun disposeSession(session: String, callback: (Result<Unit>) -> Unit)
+  suspend fun disposeSession(session: String)
   /** Generates a complete response for [prompt] in [session]. */
-  fun generateText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, callback: (Result<LocalAiGenerationResponseMessage>) -> Unit)
+  suspend fun generateText(session: String, prompt: String, config: LocalAiGenerationConfigMessage): LocalAiGenerationResponseMessage
   /** Starts an asynchronous streaming response for [prompt] in [session]. */
-  fun startStreamingText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, callback: (Result<Unit>) -> Unit)
+  suspend fun startStreamingText(session: String, prompt: String, config: LocalAiGenerationConfigMessage)
   /** Cancels the active streaming response for [session]. */
-  fun cancelStreamingText(session: String, callback: (Result<Unit>) -> Unit)
+  suspend fun cancelStreamingText(session: String)
 
   companion object {
     /** The codec used by OnDeviceAiHostApi. */
@@ -530,14 +536,13 @@ interface OnDeviceAiHostApi {
         val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.status$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { _, reply ->
-            api.status{ result: Result<LocalAiStatusMessage> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
-              } else {
-                val data = result.getOrNull()
-                reply.reply(OnDeviceAiPigeonUtils.wrapResult(data))
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.status())
+              } catch (exception: Throwable) {
+                OnDeviceAiPigeonUtils.wrapError(exception)
               }
+              reply.reply(wrapped)
             }
           }
         } else {
@@ -550,14 +555,13 @@ interface OnDeviceAiHostApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val policyArg = args[0] as LocalAiInitializationPolicyMessage
-            api.ensureReady(policyArg) { result: Result<LocalAiStatusMessage> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
-              } else {
-                val data = result.getOrNull()
-                reply.reply(OnDeviceAiPigeonUtils.wrapResult(data))
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.ensureReady(policyArg))
+              } catch (exception: Throwable) {
+                OnDeviceAiPigeonUtils.wrapError(exception)
               }
+              reply.reply(wrapped)
             }
           }
         } else {
@@ -570,14 +574,13 @@ interface OnDeviceAiHostApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val instructionsArg = args[0] as String
-            api.createSession(instructionsArg) { result: Result<String> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
-              } else {
-                val data = result.getOrNull()
-                reply.reply(OnDeviceAiPigeonUtils.wrapResult(data))
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.createSession(instructionsArg))
+              } catch (exception: Throwable) {
+                OnDeviceAiPigeonUtils.wrapError(exception)
               }
+              reply.reply(wrapped)
             }
           }
         } else {
@@ -590,13 +593,14 @@ interface OnDeviceAiHostApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val sessionArg = args[0] as String
-            api.disposeSession(sessionArg) { result: Result<Unit> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
-              } else {
-                reply.reply(OnDeviceAiPigeonUtils.wrapResult(null))
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                api.disposeSession(sessionArg)
+                listOf(null)
+              } catch (exception: Throwable) {
+                OnDeviceAiPigeonUtils.wrapError(exception)
               }
+              reply.reply(wrapped)
             }
           }
         } else {
@@ -611,14 +615,13 @@ interface OnDeviceAiHostApi {
             val sessionArg = args[0] as String
             val promptArg = args[1] as String
             val configArg = args[2] as LocalAiGenerationConfigMessage
-            api.generateText(sessionArg, promptArg, configArg) { result: Result<LocalAiGenerationResponseMessage> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
-              } else {
-                val data = result.getOrNull()
-                reply.reply(OnDeviceAiPigeonUtils.wrapResult(data))
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                listOf(api.generateText(sessionArg, promptArg, configArg))
+              } catch (exception: Throwable) {
+                OnDeviceAiPigeonUtils.wrapError(exception)
               }
+              reply.reply(wrapped)
             }
           }
         } else {
@@ -633,13 +636,14 @@ interface OnDeviceAiHostApi {
             val sessionArg = args[0] as String
             val promptArg = args[1] as String
             val configArg = args[2] as LocalAiGenerationConfigMessage
-            api.startStreamingText(sessionArg, promptArg, configArg) { result: Result<Unit> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
-              } else {
-                reply.reply(OnDeviceAiPigeonUtils.wrapResult(null))
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                api.startStreamingText(sessionArg, promptArg, configArg)
+                listOf(null)
+              } catch (exception: Throwable) {
+                OnDeviceAiPigeonUtils.wrapError(exception)
               }
+              reply.reply(wrapped)
             }
           }
         } else {
@@ -652,13 +656,14 @@ interface OnDeviceAiHostApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val sessionArg = args[0] as String
-            api.cancelStreamingText(sessionArg) { result: Result<Unit> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(OnDeviceAiPigeonUtils.wrapError(error))
-              } else {
-                reply.reply(OnDeviceAiPigeonUtils.wrapResult(null))
+            CoroutineScope(Dispatchers.Main).launch {
+              val wrapped: List<Any?> = try {
+                api.cancelStreamingText(sessionArg)
+                listOf(null)
+              } catch (exception: Throwable) {
+                OnDeviceAiPigeonUtils.wrapError(exception)
               }
+              reply.reply(wrapped)
             }
           }
         } else {

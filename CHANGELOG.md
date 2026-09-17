@@ -1,3 +1,12 @@
+## 0.5.3
+
+- Moves the Pigeon host API to `@async`: the Kotlin bridge now implements
+    `suspend` functions and the Swift bridge `async throws` functions instead
+    of completion callbacks. No public Dart API change.
+- Fixes Swift 6 concurrency warnings in the Apple streaming handler.
+- Fixes a stream that was replaced by a new stream closing the new stream with
+    its cancellation chunk. A superseded stream now emits nothing further.
+
 ## 0.5.2
 
 - Regenerates the Dart, Kotlin, and Swift bindings with Pigeon 29. Host API

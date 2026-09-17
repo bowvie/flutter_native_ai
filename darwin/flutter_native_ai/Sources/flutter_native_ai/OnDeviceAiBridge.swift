@@ -27,6 +27,10 @@ import Foundation
 /// FoundationModels. Runtime availability checks keep unsupported OS versions
 /// and unavailable model states out of the Dart UI layer.
 final class OnDeviceAiBridge: OnDeviceAiHostApi {
+  // Host methods are nonisolated `async`, so they no longer all resume on the
+  // platform thread. Session storage is locked to keep the serialization the
+  // callback-based bridge got from the main thread for free.
+  private let sessionsLock = NSLock()
   private var sessions: [String: Any] = [:]
   private let streamHandler = LocalAiGenerationStreamHandler()
   private let statusHandler = LocalAiStatusStreamHandler()
@@ -44,136 +48,115 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   }
 
   /// Returns the current Apple Foundation Models support and readiness state.
-  func status(completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void) {
-    completion(.success(currentStatus()))
+  func status() async throws -> LocalAiStatusMessage {
+    currentStatus()
   }
 
   /// Refreshes Apple readiness. Foundation Models does not expose app-triggered downloads.
   func ensureReady(
-    policy: LocalAiInitializationPolicyMessage,
-    completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void
-  ) {
+    policy: LocalAiInitializationPolicyMessage
+  ) async throws -> LocalAiStatusMessage {
     let status = currentStatus()
-    statusHandler.emit(status)
-    completion(.success(status))
+    await statusHandler.emit(status)
+    return status
   }
 
   /// Creates a native Foundation Models session.
-  func createSession(
-    instructions: String,
-    completion: @escaping (Result<String, Error>) -> Void
-  ) {
+  func createSession(instructions: String) async throws -> String {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
         let status = currentStatus()
         guard status.isAvailable else {
-          completion(.failure(PigeonError(
+          throw PigeonError(
             code: "local-ai-unavailable",
             message: status.reason,
             details: status.platformStatus
-          )))
-          return
+          )
         }
 
         let session = UUID().uuidString
-        sessions[session] = LocalAiSession(instructions: instructions)
-        completion(.success(session))
+        storeSession(LocalAiSession(instructions: instructions), for: session)
+        return session
       } else {
-        completion(.failure(PigeonError(
+        throw PigeonError(
           code: "local-ai-unsupported-os",
           message: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
           details: nil
-        )))
+        )
       }
     #else
-      completion(.failure(PigeonError(
+      throw PigeonError(
         code: "local-ai-framework-unavailable",
         message: "FoundationModels.framework is not available in this SDK.",
         details: nil
-      )))
+      )
     #endif
   }
 
   /// Releases the native Foundation Models session.
-  func disposeSession(
-    session: String,
-    completion: @escaping (Result<Void, Error>) -> Void
-  ) {
+  func disposeSession(session: String) async throws {
     streamHandler.cancel(session: session)
-    sessions.removeValue(forKey: session)
-    completion(.success(()))
+    removeSession(session)
   }
 
   /// Generates a complete response for one prompt.
   func generateText(
     session: String,
     prompt: String,
-    config: LocalAiGenerationConfigMessage,
-    completion: @escaping (Result<LocalAiGenerationResponseMessage, Error>) -> Void
-  ) {
+    config: LocalAiGenerationConfigMessage
+  ) async throws -> LocalAiGenerationResponseMessage {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
         let status = currentStatus()
         guard status.isAvailable else {
-          completion(.failure(PigeonError(
+          throw PigeonError(
             code: "local-ai-unavailable",
             message: status.reason,
             details: status.platformStatus
-          )))
-          return
+          )
         }
 
-        guard let localSession = sessions[session] as? LocalAiSession else {
-          completion(.failure(PigeonError(
+        guard let localSession = storedSession(session) as? LocalAiSession else {
+          throw PigeonError(
             code: "local-ai-session-not-found",
             message: "The local AI session has already been disposed or was not created.",
             details: nil
-          )))
-          return
+          )
         }
 
-        Task.detached(priority: .userInitiated) {
-          let startTime = Date()
+        let startTime = Date()
+        let options = GenerationOptions(
+          temperature: config.temperature,
+          maximumResponseTokens: config.maxTokens.map(Int.init)
+        )
 
-          do {
-            let response: LanguageModelSession.Response<String>
-            let options = GenerationOptions(
-              temperature: config.temperature,
-              maximumResponseTokens: config.maxTokens.map(Int.init)
-            )
-
-            response = try await localSession.modelSession.respond(to: prompt, options: options)
-
-            DispatchQueue.main.async {
-              completion(.success(LocalAiGenerationResponseMessage(
-                text: response.content,
-                tokenCount: nil,
-                durationMs: Date().timeIntervalSince(startTime) * 1000
-              )))
-            }
-          } catch {
-            DispatchQueue.main.async {
-              completion(.failure(PigeonError(
-                code: "local-ai-generation-failed",
-                message: error.localizedDescription,
-                details: String(describing: error)
-              )))
-            }
-          }
+        do {
+          let response = try await localSession.modelSession.respond(to: prompt, options: options)
+          return LocalAiGenerationResponseMessage(
+            text: response.content,
+            tokenCount: nil,
+            durationMs: Date().timeIntervalSince(startTime) * 1000
+          )
+        } catch {
+          throw PigeonError(
+            code: "local-ai-generation-failed",
+            message: error.localizedDescription,
+            details: String(describing: error)
+          )
         }
       } else {
-        completion(.failure(PigeonError(
+        throw PigeonError(
           code: "local-ai-unsupported-os",
           message: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
           details: nil
-        )))
+        )
       }
     #else
-      completion(.failure(PigeonError(
+      throw PigeonError(
         code: "local-ai-framework-unavailable",
         message: "FoundationModels.framework is not available in this SDK.",
         details: nil
-      )))
+      )
     #endif
   }
 
@@ -181,28 +164,25 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
   func startStreamingText(
     session: String,
     prompt: String,
-    config: LocalAiGenerationConfigMessage,
-    completion: @escaping (Result<Void, Error>) -> Void
-  ) {
+    config: LocalAiGenerationConfigMessage
+  ) async throws {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
         let status = currentStatus()
         guard status.isAvailable else {
-          completion(.failure(PigeonError(
+          throw PigeonError(
             code: "local-ai-unavailable",
             message: status.reason,
             details: status.platformStatus
-          )))
-          return
+          )
         }
 
-        guard let localSession = sessions[session] as? LocalAiSession else {
-          completion(.failure(PigeonError(
+        guard let localSession = storedSession(session) as? LocalAiSession else {
+          throw PigeonError(
             code: "local-ai-session-not-found",
             message: "The local AI session has already been disposed or was not created.",
             details: nil
-          )))
-          return
+          )
         }
 
         streamHandler.start(
@@ -211,27 +191,43 @@ final class OnDeviceAiBridge: OnDeviceAiHostApi {
           localSession: localSession,
           config: config
         )
-        completion(.success(()))
       } else {
-        completion(.failure(PigeonError(
+        throw PigeonError(
           code: "local-ai-unsupported-os",
           message: "Apple Foundation Models requires iOS 26.0 or macOS 26.0 or later.",
           details: nil
-        )))
+        )
       }
     #else
-      completion(.failure(PigeonError(
+      throw PigeonError(
         code: "local-ai-framework-unavailable",
         message: "FoundationModels.framework is not available in this SDK.",
         details: nil
-      )))
+      )
     #endif
   }
 
   /// Cancels the active streaming generation task.
-  func cancelStreamingText(session: String, completion: @escaping (Result<Void, Error>) -> Void) {
+  func cancelStreamingText(session: String) async throws {
     streamHandler.cancel(session: session)
-    completion(.success(()))
+  }
+
+  private func storeSession(_ value: Any, for session: String) {
+    sessionsLock.lock()
+    defer { sessionsLock.unlock() }
+    sessions[session] = value
+  }
+
+  private func storedSession(_ session: String) -> Any? {
+    sessionsLock.lock()
+    defer { sessionsLock.unlock() }
+    return sessions[session]
+  }
+
+  private func removeSession(_ session: String) {
+    sessionsLock.lock()
+    defer { sessionsLock.unlock() }
+    sessions.removeValue(forKey: session)
   }
 
   /// Maps Foundation Models availability into a stable Pigeon message.
@@ -302,14 +298,10 @@ final class LocalAiStatusStreamHandler: StatusStreamStreamHandler {
     sink = nil
   }
 
+  /// Awaitable so `ensureReady` returns only after the snapshot is delivered.
+  @MainActor
   func emit(_ status: LocalAiStatusMessage) {
-    if Thread.isMainThread {
-      sink?.success(status)
-    } else {
-      DispatchQueue.main.async { [weak self] in
-        self?.sink?.success(status)
-      }
-    }
+    sink?.success(status)
   }
 }
 
@@ -323,7 +315,15 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
   private var sink: PigeonEventSink<LocalAiStreamChunkMessage>?
 
   #if canImport(FoundationModels)
-    private var currentTasks: [String: Task<Void, Never>] = [:]
+    private let tasksLock = NSLock()
+    // The generation lets a finishing task clear only its own entry, never
+    // the entry of a stream that replaced it.
+    private var currentTasks: [String: (generation: UInt64, task: Task<Void, Never>)] = [:]
+    // Bumped by every `start`. The event channel carries no stream id, so only
+    // the latest generation may emit; anything older would land in the new
+    // stream's listener. An explicit cancel does not bump it, so a cancelled
+    // stream still delivers its terminal chunk.
+    private var streamGeneration: UInt64 = 0
   #endif
 
   /// Stores the active event sink for later generation chunks.
@@ -336,6 +336,13 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
 
   /// Cancels generation and clears the event sink when Dart stops listening.
   override func onCancel(withArguments arguments: Any?) {
+    #if canImport(FoundationModels)
+      // The listener is gone; its stream's terminal chunk must not reach a
+      // listener that attaches next.
+      tasksLock.lock()
+      streamGeneration += 1
+      tasksLock.unlock()
+    #endif
     cancelAll()
     sink = nil
   }
@@ -344,8 +351,10 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
   func cancel(session: String) {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
-        currentTasks[session]?.cancel()
-        currentTasks[session] = nil
+        tasksLock.lock()
+        let entry = currentTasks.removeValue(forKey: session)
+        tasksLock.unlock()
+        entry?.task.cancel()
       }
     #endif
   }
@@ -354,8 +363,11 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
   func cancelAll() {
     #if canImport(FoundationModels)
       if #available(iOS 26.0, macOS 26.0, *) {
-        currentTasks.values.forEach { $0.cancel() }
+        tasksLock.lock()
+        let tasks = currentTasks.values.map(\.task)
         currentTasks.removeAll()
+        tasksLock.unlock()
+        tasks.forEach { $0.cancel() }
       }
     #endif
   }
@@ -372,11 +384,17 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       // Streaming chunks share a single event channel without a session id, so
       // only one generation may stream at a time per plugin instance. Cancel
       // any in-flight stream (for this or another session) before starting.
-      cancelAll()
+      // Replacement happens under one lock so concurrent starts cannot both
+      // survive.
       let temperature = config.temperature
       let maximumResponseTokens = config.maxTokens.map(Int.init)
 
-      currentTasks[session] = Task.detached(priority: .userInitiated) { [weak self] in
+      tasksLock.lock()
+      streamGeneration += 1
+      let generation = streamGeneration
+      let replacedTasks = currentTasks.values.map(\.task)
+      currentTasks.removeAll()
+      let task = Task.detached(priority: .userInitiated) { [weak self] in
         do {
           let options = GenerationOptions(
             temperature: temperature,
@@ -390,51 +408,77 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
               return
             }
 
-            latestText = snapshot.content
-            await MainActor.run {
-              self?.sendChunk(text: latestText, isDone: false)
-            }
+            // Bound to a `let` per iteration: passing the snapshot as an
+            // argument keeps a mutable local out of concurrently-executing code.
+            let snapshotText = snapshot.content
+            latestText = snapshotText
+            await self?.sendChunk(text: snapshotText, isDone: false, generation: generation)
           }
 
-          await MainActor.run {
-            self?.sendChunk(text: latestText, isDone: true)
-          }
+          let finalText = latestText
+          await self?.sendChunk(text: finalText, isDone: true, generation: generation)
         } catch is CancellationError {
-          await MainActor.run {
-            self?.sendChunk(text: "", isDone: true)
-          }
+          await self?.sendChunk(text: "", isDone: true, generation: generation)
         } catch {
-          await MainActor.run {
-            self?.sendError(error)
-          }
+          await self?.sendError(error, generation: generation)
         }
 
-        await MainActor.run {
-          self?.currentTasks[session] = nil
-        }
+        self?.clearTask(session: session, generation: generation)
+      }
+      currentTasks[session] = (generation: generation, task: task)
+      tasksLock.unlock()
+      replacedTasks.forEach { $0.cancel() }
+    }
+
+    /// Drops the finished task entry unless a newer stream already replaced it.
+    fileprivate func clearTask(session: String, generation: UInt64) {
+      tasksLock.lock()
+      defer { tasksLock.unlock() }
+      if currentTasks[session]?.generation == generation {
+        currentTasks[session] = nil
       }
     }
   #endif
 
+  /// Delivers [chunk] unless a newer stream has started. The lock is held
+  /// across the send so `start` cannot supersede the task in between.
+  @MainActor
+  private func deliver(_ chunk: LocalAiStreamChunkMessage, generation: UInt64) {
+    #if canImport(FoundationModels)
+      tasksLock.lock()
+      defer { tasksLock.unlock() }
+      if generation != streamGeneration {
+        return
+      }
+    #endif
+    sink?.success(chunk)
+  }
+
   /// Sends a text snapshot to Dart on the main actor.
   @MainActor
-  private func sendChunk(text: String, isDone: Bool) {
-    sink?.success(LocalAiStreamChunkMessage(
-      text: text,
-      isDone: isDone,
-      errorCode: nil,
-      errorMessage: nil
-    ))
+  private func sendChunk(text: String, isDone: Bool, generation: UInt64) {
+    deliver(
+      LocalAiStreamChunkMessage(
+        text: text,
+        isDone: isDone,
+        errorCode: nil,
+        errorMessage: nil
+      ),
+      generation: generation
+    )
   }
 
   /// Encodes generation failures as a terminal stream chunk.
   @MainActor
-  private func sendError(_ error: Error) {
-    sink?.success(LocalAiStreamChunkMessage(
-      text: "",
-      isDone: true,
-      errorCode: "local-ai-generation-failed",
-      errorMessage: error.localizedDescription
-    ))
+  private func sendError(_ error: Error, generation: UInt64) {
+    deliver(
+      LocalAiStreamChunkMessage(
+        text: "",
+        isDone: true,
+        errorCode: "local-ai-generation-failed",
+        errorMessage: error.localizedDescription
+      ),
+      generation: generation
+    )
   }
 }

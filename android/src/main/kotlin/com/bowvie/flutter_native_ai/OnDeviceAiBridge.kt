@@ -39,6 +39,7 @@ private const val MAX_HISTORY_MESSAGES = 20
  * snapshots to match the iOS Foundation Models bridge.
  */
 class OnDeviceAiBridge : OnDeviceAiHostApi {
+    /** Owns every host call and the download job; cancelled by [close]. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val generationClient = Generation.getClient()
     private val streamHandler = LocalAiGenerationStreamHandler(generationClient)
@@ -51,178 +52,173 @@ class OnDeviceAiBridge : OnDeviceAiHostApi {
         StatusStreamStreamHandler.register(messenger, statusHandler)
     }
 
-    override fun status(callback: (Result<LocalAiStatusMessage>) -> Unit) {
-        scope.launch {
-            val status = withContext(Dispatchers.Default) {
-                currentStatus()
-            }
-            callback(Result.success(status))
-        }
+    /**
+     * Runs a host call on the bridge scope. Pigeon launches each call in its
+     * own unowned scope, which [close] could not otherwise cancel on detach.
+     */
+    private suspend fun <T> hostCall(block: suspend CoroutineScope.() -> T): T {
+        return scope.async(block = block).await()
     }
 
-    override fun ensureReady(
+    override suspend fun status(): LocalAiStatusMessage = hostCall {
+        withContext(Dispatchers.Default) { currentStatus() }
+    }
+
+    override suspend fun ensureReady(
         policy: LocalAiInitializationPolicyMessage,
-        callback: (Result<LocalAiStatusMessage>) -> Unit,
-    ) {
-        scope.launch {
-            try {
-                if (policy == LocalAiInitializationPolicyMessage.NEVER) {
-                    val neverStatus = withContext(Dispatchers.Default) { currentStatus() }
-                    statusHandler.emit(neverStatus)
-                    callback(Result.success(neverStatus))
-                    return@launch
-                }
+    ): LocalAiStatusMessage = hostCall { ensureReadyOnScope(policy) }
 
-                val currentStatus = withContext(Dispatchers.Default) {
-                    currentStatus()
-                }
-                if (currentStatus.isAvailable || !currentStatus.canInitialize) {
-                    statusHandler.emit(currentStatus)
-                    callback(Result.success(currentStatus))
-                    return@launch
-                }
+    private suspend fun ensureReadyOnScope(
+        policy: LocalAiInitializationPolicyMessage,
+    ): LocalAiStatusMessage {
+        try {
+            if (policy == LocalAiInitializationPolicyMessage.NEVER) {
+                val neverStatus = withContext(Dispatchers.Default) { currentStatus() }
+                statusHandler.emit(neverStatus)
+                return neverStatus
+            }
 
-                val job = initializationJob ?: async(Dispatchers.Default) {
-                    initializeModel()
-                }.also { deferred ->
-                    initializationJob = deferred
-                    deferred.invokeOnCompletion {
-                        scope.launch {
-                            if (initializationJob === deferred) {
-                                initializationJob = null
-                            }
+            val currentStatus = withContext(Dispatchers.Default) {
+                currentStatus()
+            }
+            if (currentStatus.isAvailable || !currentStatus.canInitialize) {
+                statusHandler.emit(currentStatus)
+                return currentStatus
+            }
+
+            // Started on the bridge scope, not the caller's, so the download
+            // outlives this call and is cancelled only by close().
+            val job = initializationJob ?: scope.async(Dispatchers.Default) {
+                initializeModel()
+            }.also { deferred ->
+                initializationJob = deferred
+                deferred.invokeOnCompletion {
+                    scope.launch {
+                        if (initializationJob === deferred) {
+                            initializationJob = null
                         }
                     }
                 }
-
-                callback(Result.success(job.await()))
-            } catch (error: CancellationException) {
-                callback(Result.failure(error))
-            } catch (error: Throwable) {
-                val failed = initializationFailedStatus(error)
-                statusHandler.emit(failed)
-                callback(Result.success(failed))
             }
+
+            return job.await()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            val failed = initializationFailedStatus(error)
+            statusHandler.emit(failed)
+            return failed
         }
     }
 
-    override fun createSession(instructions: String, callback: (Result<String>) -> Unit) {
-        scope.launch {
-            val status = withContext(Dispatchers.Default) {
-                currentStatus()
-            }
-            if (!status.isAvailable) {
-                callback(Result.failure(unavailableError(status)))
-                return@launch
-            }
-
-            val session = UUID.randomUUID().toString()
-            sessions[session] = LocalAiSession(instructions = instructions)
-            callback(Result.success(session))
-        }
+    override suspend fun createSession(instructions: String): String = hostCall {
+        createSessionOnScope(instructions)
     }
 
-    override fun disposeSession(session: String, callback: (Result<Unit>) -> Unit) {
+    private suspend fun createSessionOnScope(instructions: String): String {
+        val status = withContext(Dispatchers.Default) {
+            currentStatus()
+        }
+        if (!status.isAvailable) {
+            throw unavailableError(status)
+        }
+
+        val session = UUID.randomUUID().toString()
+        sessions[session] = LocalAiSession(instructions = instructions)
+        return session
+    }
+
+    override suspend fun disposeSession(session: String) = hostCall {
         streamHandler.cancel(session)
         sessions.remove(session)
-        callback(Result.success(Unit))
+        Unit
     }
 
-    override fun generateText(
+    override suspend fun generateText(
         session: String,
         prompt: String,
         config: LocalAiGenerationConfigMessage,
-        callback: (Result<LocalAiGenerationResponseMessage>) -> Unit,
-    ) {
-        scope.launch {
-            try {
-                val localSession = sessions[session]
-                if (localSession == null) {
-                    callback(Result.failure(sessionNotFoundError()))
-                    return@launch
+    ): LocalAiGenerationResponseMessage = hostCall {
+        generateTextOnScope(session, prompt, config)
+    }
+
+    private suspend fun generateTextOnScope(
+        session: String,
+        prompt: String,
+        config: LocalAiGenerationConfigMessage,
+    ): LocalAiGenerationResponseMessage {
+        val localSession = sessions[session] ?: throw sessionNotFoundError()
+
+        try {
+            return withContext(Dispatchers.Default) {
+                val status = currentStatus()
+                if (!status.isAvailable) {
+                    throw unavailableError(status)
                 }
 
-                val result = withContext(Dispatchers.Default) {
-                    val status = currentStatus()
-                    if (!status.isAvailable) {
-                        throw unavailableError(status)
-                    }
-
-                    val startTime = SystemClock.elapsedRealtimeNanos()
-                    val response = generationClient.generateContent(
-                        buildRequest(prompt, config, localSession),
-                    )
-                    val text = response.candidates.firstOrNull()?.text
-                    if (text.isNullOrBlank()) {
-                        throw FlutterError(
-                            LOCAL_AI_GENERATION_FAILED,
-                            "Gemini Nano returned no generated text.",
-                            "No candidates returned by ML Kit Prompt API.",
-                        )
-                    }
-
-                    localSession.record(prompt, text)
-                    Result.success(
-                        LocalAiGenerationResponseMessage(
-                            text = text,
-                            tokenCount = null,
-                            durationMs = elapsedMillisSince(startTime),
-                        ),
+                val startTime = SystemClock.elapsedRealtimeNanos()
+                val response = generationClient.generateContent(
+                    buildRequest(prompt, config, localSession),
+                )
+                val text = response.candidates.firstOrNull()?.text
+                if (text.isNullOrBlank()) {
+                    throw FlutterError(
+                        LOCAL_AI_GENERATION_FAILED,
+                        "Gemini Nano returned no generated text.",
+                        "No candidates returned by ML Kit Prompt API.",
                     )
                 }
-                callback(result)
-            } catch (error: CancellationException) {
-                callback(Result.failure(error))
-            } catch (error: FlutterError) {
-                callback(Result.failure(error))
-            } catch (error: Throwable) {
-                callback(
-                    Result.failure(
-                        FlutterError(
-                            LOCAL_AI_GENERATION_FAILED,
-                            error.localizedMessage ?: "Gemini Nano generation failed.",
-                            error.toString(),
-                        ),
-                    ),
+
+                localSession.record(prompt, text)
+                LocalAiGenerationResponseMessage(
+                    text = text,
+                    tokenCount = null,
+                    durationMs = elapsedMillisSince(startTime),
                 )
             }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: FlutterError) {
+            throw error
+        } catch (error: Throwable) {
+            throw FlutterError(
+                LOCAL_AI_GENERATION_FAILED,
+                error.localizedMessage ?: "Gemini Nano generation failed.",
+                error.toString(),
+            )
         }
     }
 
-    override fun startStreamingText(
+    override suspend fun startStreamingText(
         session: String,
         prompt: String,
         config: LocalAiGenerationConfigMessage,
-        callback: (Result<Unit>) -> Unit,
+    ) = hostCall { startStreamingTextOnScope(session, prompt, config) }
+
+    private suspend fun startStreamingTextOnScope(
+        session: String,
+        prompt: String,
+        config: LocalAiGenerationConfigMessage,
     ) {
-        scope.launch {
-            val status = withContext(Dispatchers.Default) {
-                currentStatus()
-            }
-            if (!status.isAvailable) {
-                callback(Result.failure(unavailableError(status)))
-                return@launch
-            }
-
-            val localSession = sessions[session]
-            if (localSession == null) {
-                callback(Result.failure(sessionNotFoundError()))
-                return@launch
-            }
-
-            streamHandler.start(
-                session = session,
-                prompt = prompt,
-                localSession = localSession,
-                config = config,
-            )
-            callback(Result.success(Unit))
+        val status = withContext(Dispatchers.Default) {
+            currentStatus()
         }
+        if (!status.isAvailable) {
+            throw unavailableError(status)
+        }
+
+        val localSession = sessions[session] ?: throw sessionNotFoundError()
+
+        streamHandler.start(
+            session = session,
+            prompt = prompt,
+            localSession = localSession,
+            config = config,
+        )
     }
 
-    override fun cancelStreamingText(session: String, callback: (Result<Unit>) -> Unit) {
+    override suspend fun cancelStreamingText(session: String) = hostCall {
         streamHandler.cancel(session)
-        callback(Result.success(Unit))
     }
 
     fun close() {
@@ -457,11 +453,20 @@ private class LocalAiGenerationStreamHandler(
     private var sink: PigeonEventSink<LocalAiStreamChunkMessage>? = null
     private val currentJobs = ConcurrentHashMap<String, Job>()
 
+    // Bumped by every start(). The event channel carries no stream id, so only
+    // the latest generation may emit; anything older would land in the new
+    // stream's listener. An explicit cancel does not bump it, so a cancelled
+    // stream still delivers its terminal chunk. Main thread only.
+    private var streamGeneration = 0L
+
     override fun onListen(p0: Any?, sink: PigeonEventSink<LocalAiStreamChunkMessage>) {
         this.sink = sink
     }
 
     override fun onCancel(p0: Any?) {
+        // The listener is gone; its stream's terminal chunk must not reach a
+        // listener that attaches next.
+        streamGeneration++
         cancelAll()
         sink = null
     }
@@ -475,6 +480,7 @@ private class LocalAiGenerationStreamHandler(
         // Streaming chunks share a single event channel without a session id, so
         // only one generation may stream at a time per plugin instance. Cancel
         // any in-flight stream (for this or another session) before starting.
+        val generation = ++streamGeneration
         cancelAll()
 
         currentJobs[session] = scope.launch {
@@ -485,6 +491,7 @@ private class LocalAiGenerationStreamHandler(
                 ).collect { chunk ->
                     latestText.append(chunk.candidates.firstOrNull()?.text.orEmpty())
                     emit(
+                        generation,
                         LocalAiStreamChunkMessage(
                             text = latestText.toString(),
                             isDone = false,
@@ -493,6 +500,7 @@ private class LocalAiGenerationStreamHandler(
                 }
 
                 emit(
+                    generation,
                     LocalAiStreamChunkMessage(
                         text = latestText.toString(),
                         isDone = true,
@@ -500,12 +508,13 @@ private class LocalAiGenerationStreamHandler(
                 )
                 localSession.record(prompt, latestText.toString())
             } catch (error: CancellationException) {
-                // Cancellation can be initiated natively (e.g. disposeSession or
-                // a new stream starting). Emit a terminal chunk in a
-                // non-cancellable context so any active Dart listener completes
-                // deterministically instead of hanging.
+                // Cancellation can be initiated natively (e.g. disposeSession).
+                // Emit a terminal chunk in a non-cancellable context so the
+                // active Dart listener completes deterministically instead of
+                // hanging. A superseded stream is filtered out in emit().
                 withContext(NonCancellable) {
                     emit(
+                        generation,
                         LocalAiStreamChunkMessage(
                             text = latestText.toString(),
                             isDone = true,
@@ -514,6 +523,7 @@ private class LocalAiGenerationStreamHandler(
                 }
             } catch (error: Throwable) {
                 emit(
+                    generation,
                     LocalAiStreamChunkMessage(
                         text = latestText.toString(),
                         isDone = true,
@@ -542,9 +552,11 @@ private class LocalAiGenerationStreamHandler(
         sink = null
     }
 
-    private suspend fun emit(chunk: LocalAiStreamChunkMessage) {
+    private suspend fun emit(generation: Long, chunk: LocalAiStreamChunkMessage) {
         withContext(Dispatchers.Main.immediate) {
-            sink?.success(chunk)
+            if (generation == streamGeneration) {
+                sink?.success(chunk)
+            }
         }
     }
 }

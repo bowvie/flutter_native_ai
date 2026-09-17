@@ -486,19 +486,19 @@ var onDeviceAiPigeonMethodCodec = FlutterStandardMethodCodec(readerWriter: OnDev
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
 protocol OnDeviceAiHostApi {
   /// Checks the current device, OS, and model readiness.
-  func status(completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void)
+  func status() async throws -> LocalAiStatusMessage
   /// Ensures the native model is ready according to [policy].
-  func ensureReady(policy: LocalAiInitializationPolicyMessage, completion: @escaping (Result<LocalAiStatusMessage, Error>) -> Void)
+  func ensureReady(policy: LocalAiInitializationPolicyMessage) async throws -> LocalAiStatusMessage
   /// Creates a native model session.
-  func createSession(instructions: String, completion: @escaping (Result<String, Error>) -> Void)
+  func createSession(instructions: String) async throws -> String
   /// Releases the native resources associated with [session].
-  func disposeSession(session: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func disposeSession(session: String) async throws
   /// Generates a complete response for [prompt] in [session].
-  func generateText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, completion: @escaping (Result<LocalAiGenerationResponseMessage, Error>) -> Void)
+  func generateText(session: String, prompt: String, config: LocalAiGenerationConfigMessage) async throws -> LocalAiGenerationResponseMessage
   /// Starts an asynchronous streaming response for [prompt] in [session].
-  func startStreamingText(session: String, prompt: String, config: LocalAiGenerationConfigMessage, completion: @escaping (Result<Void, Error>) -> Void)
+  func startStreamingText(session: String, prompt: String, config: LocalAiGenerationConfigMessage) async throws
   /// Cancels the active streaming response for [session].
-  func cancelStreamingText(session: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func cancelStreamingText(session: String) async throws
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -511,11 +511,11 @@ class OnDeviceAiHostApiSetup {
     let statusChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_native_ai.OnDeviceAiHostApi.status\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       statusChannel.setMessageHandler { _, reply in
-        api.status { result in
-          switch result {
-          case .success(let res):
-            reply(wrapResult(res))
-          case .failure(let error):
+        Task { @MainActor in
+          do {
+            let result = try await api.status()
+            reply(wrapResult(result))
+          } catch {
             reply(wrapError(error))
           }
         }
@@ -529,11 +529,11 @@ class OnDeviceAiHostApiSetup {
       ensureReadyChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let policyArg = args[0] as! LocalAiInitializationPolicyMessage
-        api.ensureReady(policy: policyArg) { result in
-          switch result {
-          case .success(let res):
-            reply(wrapResult(res))
-          case .failure(let error):
+        Task { @MainActor in
+          do {
+            let result = try await api.ensureReady(policy: policyArg)
+            reply(wrapResult(result))
+          } catch {
             reply(wrapError(error))
           }
         }
@@ -547,11 +547,11 @@ class OnDeviceAiHostApiSetup {
       createSessionChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let instructionsArg = args[0] as! String
-        api.createSession(instructions: instructionsArg) { result in
-          switch result {
-          case .success(let res):
-            reply(wrapResult(res))
-          case .failure(let error):
+        Task { @MainActor in
+          do {
+            let result = try await api.createSession(instructions: instructionsArg)
+            reply(wrapResult(result))
+          } catch {
             reply(wrapError(error))
           }
         }
@@ -565,11 +565,11 @@ class OnDeviceAiHostApiSetup {
       disposeSessionChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let sessionArg = args[0] as! String
-        api.disposeSession(session: sessionArg) { result in
-          switch result {
-          case .success:
+        Task { @MainActor in
+          do {
+            try await api.disposeSession(session: sessionArg)
             reply(wrapResult(nil))
-          case .failure(let error):
+          } catch {
             reply(wrapError(error))
           }
         }
@@ -585,11 +585,11 @@ class OnDeviceAiHostApiSetup {
         let sessionArg = args[0] as! String
         let promptArg = args[1] as! String
         let configArg = args[2] as! LocalAiGenerationConfigMessage
-        api.generateText(session: sessionArg, prompt: promptArg, config: configArg) { result in
-          switch result {
-          case .success(let res):
-            reply(wrapResult(res))
-          case .failure(let error):
+        Task { @MainActor in
+          do {
+            let result = try await api.generateText(session: sessionArg, prompt: promptArg, config: configArg)
+            reply(wrapResult(result))
+          } catch {
             reply(wrapError(error))
           }
         }
@@ -605,11 +605,11 @@ class OnDeviceAiHostApiSetup {
         let sessionArg = args[0] as! String
         let promptArg = args[1] as! String
         let configArg = args[2] as! LocalAiGenerationConfigMessage
-        api.startStreamingText(session: sessionArg, prompt: promptArg, config: configArg) { result in
-          switch result {
-          case .success:
+        Task { @MainActor in
+          do {
+            try await api.startStreamingText(session: sessionArg, prompt: promptArg, config: configArg)
             reply(wrapResult(nil))
-          case .failure(let error):
+          } catch {
             reply(wrapError(error))
           }
         }
@@ -623,11 +623,11 @@ class OnDeviceAiHostApiSetup {
       cancelStreamingTextChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let sessionArg = args[0] as! String
-        api.cancelStreamingText(session: sessionArg) { result in
-          switch result {
-          case .success:
+        Task { @MainActor in
+          do {
+            try await api.cancelStreamingText(session: sessionArg)
             reply(wrapResult(nil))
-          case .failure(let error):
+          } catch {
             reply(wrapError(error))
           }
         }

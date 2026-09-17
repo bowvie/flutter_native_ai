@@ -22,13 +22,13 @@ The public API surface is exported from `lib/flutter_native_ai.dart`. Only what 
 
 **Initialization is explicit.** `ensureReady()` may initialize/download a model when the platform supports it. `createSession()` does not initialize by default; callers must pass `initializationPolicy: OnDeviceAiInitializationPolicy.whenNeeded` or `always` for just-in-time initialization.
 
-**`ensureReady()` always emits a status snapshot.** On every return path — including early returns for the `NEVER` policy, already-available state, or can't-initialize state — both native bridges call `statusHandler.emit(currentStatus)` before invoking the callback. This ensures callers awaiting a `statusStream()` event after `ensureReady()` are never left hanging. Any future change to `ensureReady()` must preserve this guarantee on all platforms.
+**`ensureReady()` always emits a status snapshot.** On every return path — including early returns for the `NEVER` policy, already-available state, or can't-initialize state — both native bridges call `statusHandler.emit(currentStatus)` before returning. This ensures callers awaiting a `statusStream()` event after `ensureReady()` are never left hanging. Any future change to `ensureReady()` must preserve this guarantee on all platforms.
 
 **Initialization progress is real or null.** `statusStream()` emits model initialization status snapshots. `initializationProgress` is a nullable `0..100` integer and must only be set from real native progress. Do not synthesize percentages from time, polling count, or guessed phases.
 
 **Stream chunks are cumulative snapshots.** Each chunk contains the full text generated so far, not a delta. If the model emits `"Hello"` then `"Hello world"`, the stream emits both. Consumer UIs should replace, not append.
 
-**One active stream per plugin instance.** The event channel carries no session identifier. Starting a new stream cancels any in-flight one on both Apple and Android bridges.
+**One active stream per plugin instance.** The event channel carries no session identifier. Starting a new stream cancels any in-flight one on both Apple and Android bridges, and the superseded stream emits nothing further: its chunks would otherwise land in the new stream's listener and its terminal chunk would close it.
 
 **Sessions own native resources.** Always call `dispose()` when a generation flow is finished. Android sessions also maintain a rolling conversation history (capped at 20 messages) to simulate stateful context.
 
@@ -47,7 +47,7 @@ dart format lib/src/generated/on_device_ai.g.dart pigeons/on_device_ai.dart
 
 The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_native_ai/OnDeviceAi.g.swift`, where it is shared by both CocoaPods and Swift Package Manager. The Kotlin binding goes to `android/src/main/kotlin/com/bowvie/flutter_native_ai/OnDeviceAi.g.kt`.
 
-**Host methods are `@asyncCallback`.** Since Pigeon 28, `@async` generates `suspend` (Kotlin) and `async throws` (Swift) signatures. The bridges are written against callback signatures, so host methods in the contract must stay `@asyncCallback`.
+**Host methods are `@async`.** Since Pigeon 28, `@async` generates `suspend` (Kotlin) and `async throws` (Swift) signatures, and both bridges implement those directly: `override suspend fun` in `OnDeviceAiBridge.kt` and `func … async throws` in `OnDeviceAiBridge.swift`. Return values are returned; failures are thrown as `FlutterError` (Kotlin) or `PigeonError` (Swift) with the error codes `_mapPlatformException` expects. The generated wrappers dispatch each call on `CoroutineScope(Dispatchers.Main).launch` (Kotlin) and `Task { @MainActor in … }` (Swift). On Kotlin the body starts on the main thread and leaves it at the first suspension. On Swift only the wrapper is `@MainActor`: the bridge methods are nonisolated `async`, so their bodies run on the generic executor from entry and must be treated as concurrent. Shared Swift bridge state is therefore guarded by locks; keep that synchronization when adding state.
 
 **Known Pigeon quirk:** Pigeon emits `open fun` modifiers in the generated Kotlin event-channel wrapper. The local lint configuration rejects `open fun`. Remove those modifiers from the checked-in Kotlin binding after regeneration.
 
@@ -59,7 +59,7 @@ The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_nativ
 - Runtime status maps `SystemLanguageModel.default.availability` into `LocalAiStatusMessage`.
 - `ensureReady()` is an immediate status refresh on Apple. Foundation Models does not expose an app-triggered download path today.
 - Sessions are stored as `[String: Any]` keyed by a UUID string. Type-cast to `LocalAiSession` when retrieved.
-- Streaming uses `LanguageModelSession.streamResponse`. Foundation Models itself emits cumulative snapshots: each `snapshot.content` is the full text generated so far. The bridge assigns `latestText = snapshot.content` and forwards it directly — no manual accumulation needed on the Apple side.
+- Streaming uses `LanguageModelSession.streamResponse`. Foundation Models itself emits cumulative snapshots: each `snapshot.content` is the full text generated so far. The bridge binds each `snapshot.content` to a `let` per iteration and forwards it directly — no manual accumulation needed on the Apple side, and no mutable local is read from concurrently-executing code.
 - The shared Darwin source package lives under `darwin/flutter_native_ai`. Both CocoaPods (`darwin/flutter_native_ai.podspec`) and Swift Package Manager (`darwin/flutter_native_ai/Package.swift`) consume it.
 
 ### Android
@@ -68,9 +68,9 @@ The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_nativ
 - `ensureReady()` uses `GenerativeModel.download()` for Android model download/provisioning when the model is downloadable or already downloading.
 - Android initialization progress comes from ML Kit `DownloadStatus`: `DownloadStarted.bytesToDownload`, `DownloadProgress.totalBytesDownloaded`, `DownloadCompleted`, and `DownloadFailed`. Compute `initializationProgress` only when real byte progress is available; emit `100` on completion.
 - `LocalAiSession` manually simulates conversation history by composing a text prompt that includes instructions, previous turns (user + assistant), and the new user request. History is capped at 20 messages.
-- The bridge runs on a `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)`. Background work dispatches to `Dispatchers.Default`. Stream handler runs on its own `CoroutineScope(Dispatchers.Default)`.
+- Host methods are `suspend` functions called from an unowned scope the generated wrapper creates per call. Every suspending host method therefore runs its body through `hostCall`, which moves it onto the bridge's `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)`. That scope also owns the `ensureReady` download `Deferred`, so `close()` cancels in-flight host calls and the download on detach. New suspending host methods must use `hostCall` too. Background work dispatches to `Dispatchers.Default`. Stream handler runs on its own `CoroutineScope(Dispatchers.Default)`.
 - `maxOutputTokens` is clamped to `[1, 256]`. The default when not specified is 160.
-- Cancellation emits a terminal chunk with `isDone = true` in a `NonCancellable` context so Dart listeners complete deterministically.
+- Cancellation emits a terminal chunk with `isDone = true` in a `NonCancellable` context so Dart listeners complete deterministically. A job superseded by a new stream is the exception and emits nothing.
 - Call `OnDeviceAiBridge.close()` during plugin detach to cancel all coroutines.
 
 ## Testing
