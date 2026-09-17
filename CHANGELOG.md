@@ -4,6 +4,8 @@
     `suspend` functions and the Swift bridge `async throws` functions instead
     of completion callbacks. No public Dart API change.
 - Fixes Swift 6 concurrency warnings in the Apple streaming handler.
+- Fixes a stream that was replaced by a new stream closing the new stream with
+    its cancellation chunk. A superseded stream now emits nothing further.
 
 ## 0.5.2
 

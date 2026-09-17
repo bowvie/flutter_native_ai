@@ -453,6 +453,11 @@ private class LocalAiGenerationStreamHandler(
     private var sink: PigeonEventSink<LocalAiStreamChunkMessage>? = null
     private val currentJobs = ConcurrentHashMap<String, Job>()
 
+    // Jobs replaced by a newer stream. The event channel carries no stream id,
+    // so anything they emit would land in the new stream's listener. Only
+    // touched on the main thread.
+    private val supersededJobs = mutableSetOf<Job>()
+
     override fun onListen(p0: Any?, sink: PigeonEventSink<LocalAiStreamChunkMessage>) {
         this.sink = sink
     }
@@ -471,9 +476,12 @@ private class LocalAiGenerationStreamHandler(
         // Streaming chunks share a single event channel without a session id, so
         // only one generation may stream at a time per plugin instance. Cancel
         // any in-flight stream (for this or another session) before starting.
+        supersededJobs.removeAll { it.isCompleted }
+        supersededJobs.addAll(currentJobs.values)
         cancelAll()
 
         currentJobs[session] = scope.launch {
+            val job = coroutineContext[Job]!!
             val latestText = StringBuilder()
             try {
                 generationClient.generateContentStream(
@@ -481,6 +489,7 @@ private class LocalAiGenerationStreamHandler(
                 ).collect { chunk ->
                     latestText.append(chunk.candidates.firstOrNull()?.text.orEmpty())
                     emit(
+                        job,
                         LocalAiStreamChunkMessage(
                             text = latestText.toString(),
                             isDone = false,
@@ -489,6 +498,7 @@ private class LocalAiGenerationStreamHandler(
                 }
 
                 emit(
+                    job,
                     LocalAiStreamChunkMessage(
                         text = latestText.toString(),
                         isDone = true,
@@ -496,12 +506,13 @@ private class LocalAiGenerationStreamHandler(
                 )
                 localSession.record(prompt, latestText.toString())
             } catch (error: CancellationException) {
-                // Cancellation can be initiated natively (e.g. disposeSession or
-                // a new stream starting). Emit a terminal chunk in a
-                // non-cancellable context so any active Dart listener completes
-                // deterministically instead of hanging.
+                // Cancellation can be initiated natively (e.g. disposeSession).
+                // Emit a terminal chunk in a non-cancellable context so the
+                // active Dart listener completes deterministically instead of
+                // hanging. A superseded job is filtered out in emit().
                 withContext(NonCancellable) {
                     emit(
+                        job,
                         LocalAiStreamChunkMessage(
                             text = latestText.toString(),
                             isDone = true,
@@ -510,6 +521,7 @@ private class LocalAiGenerationStreamHandler(
                 }
             } catch (error: Throwable) {
                 emit(
+                    job,
                     LocalAiStreamChunkMessage(
                         text = latestText.toString(),
                         isDone = true,
@@ -518,7 +530,7 @@ private class LocalAiGenerationStreamHandler(
                     ),
                 )
             } finally {
-                currentJobs.remove(session, coroutineContext[Job])
+                currentJobs.remove(session, job)
             }
         }
     }
@@ -538,9 +550,11 @@ private class LocalAiGenerationStreamHandler(
         sink = null
     }
 
-    private suspend fun emit(chunk: LocalAiStreamChunkMessage) {
+    private suspend fun emit(job: Job, chunk: LocalAiStreamChunkMessage) {
         withContext(Dispatchers.Main.immediate) {
-            sink?.success(chunk)
+            if (job !in supersededJobs) {
+                sink?.success(chunk)
+            }
         }
     }
 }

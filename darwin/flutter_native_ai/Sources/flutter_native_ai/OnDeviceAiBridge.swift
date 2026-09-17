@@ -323,6 +323,9 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
     // The id lets a finishing task clear only its own entry, never the entry
     // of a stream that replaced it.
     private var currentTasks: [String: (id: UUID, task: Task<Void, Never>)] = [:]
+    // Tasks replaced by a newer stream. The event channel carries no stream
+    // id, so anything they emit would land in the new stream's listener.
+    private var supersededTaskIDs: Set<UUID> = []
   #endif
 
   /// Stores the active event sink for later generation chunks.
@@ -384,6 +387,7 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       let taskID = UUID()
       tasksLock.lock()
       let replacedTasks = currentTasks.values.map(\.task)
+      supersededTaskIDs.formUnion(currentTasks.values.map(\.id))
       currentTasks.removeAll()
       let task = Task.detached(priority: .userInitiated) { [weak self] in
         do {
@@ -403,15 +407,15 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
             // argument keeps a mutable local out of concurrently-executing code.
             let snapshotText = snapshot.content
             latestText = snapshotText
-            await self?.sendChunk(text: snapshotText, isDone: false)
+            await self?.sendChunk(text: snapshotText, isDone: false, taskID: taskID)
           }
 
           let finalText = latestText
-          await self?.sendChunk(text: finalText, isDone: true)
+          await self?.sendChunk(text: finalText, isDone: true, taskID: taskID)
         } catch is CancellationError {
-          await self?.sendChunk(text: "", isDone: true)
+          await self?.sendChunk(text: "", isDone: true, taskID: taskID)
         } catch {
-          await self?.sendError(error)
+          await self?.sendError(error, taskID: taskID)
         }
 
         self?.clearTask(session: session, id: taskID)
@@ -428,28 +432,49 @@ final class LocalAiGenerationStreamHandler: GenerationStreamStreamHandler {
       if currentTasks[session]?.id == id {
         currentTasks[session] = nil
       }
+      supersededTaskIDs.remove(id)
     }
   #endif
 
+  /// Delivers [chunk] unless the emitting task was superseded. The lock is
+  /// held across the send so `start` cannot supersede the task in between.
+  @MainActor
+  private func deliver(_ chunk: LocalAiStreamChunkMessage, taskID: UUID) {
+    #if canImport(FoundationModels)
+      tasksLock.lock()
+      defer { tasksLock.unlock() }
+      if supersededTaskIDs.contains(taskID) {
+        return
+      }
+    #endif
+    sink?.success(chunk)
+  }
+
   /// Sends a text snapshot to Dart on the main actor.
   @MainActor
-  private func sendChunk(text: String, isDone: Bool) {
-    sink?.success(LocalAiStreamChunkMessage(
-      text: text,
-      isDone: isDone,
-      errorCode: nil,
-      errorMessage: nil
-    ))
+  private func sendChunk(text: String, isDone: Bool, taskID: UUID) {
+    deliver(
+      LocalAiStreamChunkMessage(
+        text: text,
+        isDone: isDone,
+        errorCode: nil,
+        errorMessage: nil
+      ),
+      taskID: taskID
+    )
   }
 
   /// Encodes generation failures as a terminal stream chunk.
   @MainActor
-  private func sendError(_ error: Error) {
-    sink?.success(LocalAiStreamChunkMessage(
-      text: "",
-      isDone: true,
-      errorCode: "local-ai-generation-failed",
-      errorMessage: error.localizedDescription
-    ))
+  private func sendError(_ error: Error, taskID: UUID) {
+    deliver(
+      LocalAiStreamChunkMessage(
+        text: "",
+        isDone: true,
+        errorCode: "local-ai-generation-failed",
+        errorMessage: error.localizedDescription
+      ),
+      taskID: taskID
+    )
   }
 }

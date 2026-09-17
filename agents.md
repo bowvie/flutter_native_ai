@@ -28,7 +28,7 @@ The public API surface is exported from `lib/flutter_native_ai.dart`. Only what 
 
 **Stream chunks are cumulative snapshots.** Each chunk contains the full text generated so far, not a delta. If the model emits `"Hello"` then `"Hello world"`, the stream emits both. Consumer UIs should replace, not append.
 
-**One active stream per plugin instance.** The event channel carries no session identifier. Starting a new stream cancels any in-flight one on both Apple and Android bridges.
+**One active stream per plugin instance.** The event channel carries no session identifier. Starting a new stream cancels any in-flight one on both Apple and Android bridges, and the superseded stream emits nothing further: its chunks would otherwise land in the new stream's listener and its terminal chunk would close it.
 
 **Sessions own native resources.** Always call `dispose()` when a generation flow is finished. Android sessions also maintain a rolling conversation history (capped at 20 messages) to simulate stateful context.
 
@@ -70,7 +70,7 @@ The generated Swift file goes to `darwin/flutter_native_ai/Sources/flutter_nativ
 - `LocalAiSession` manually simulates conversation history by composing a text prompt that includes instructions, previous turns (user + assistant), and the new user request. History is capped at 20 messages.
 - Host methods are `suspend` functions called from an unowned scope the generated wrapper creates per call. Every suspending host method therefore runs its body through `hostCall`, which moves it onto the bridge's `CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)`. That scope also owns the `ensureReady` download `Deferred`, so `close()` cancels in-flight host calls and the download on detach. New suspending host methods must use `hostCall` too. Background work dispatches to `Dispatchers.Default`. Stream handler runs on its own `CoroutineScope(Dispatchers.Default)`.
 - `maxOutputTokens` is clamped to `[1, 256]`. The default when not specified is 160.
-- Cancellation emits a terminal chunk with `isDone = true` in a `NonCancellable` context so Dart listeners complete deterministically.
+- Cancellation emits a terminal chunk with `isDone = true` in a `NonCancellable` context so Dart listeners complete deterministically. A job superseded by a new stream is the exception and emits nothing.
 - Call `OnDeviceAiBridge.close()` during plugin detach to cancel all coroutines.
 
 ## Testing
