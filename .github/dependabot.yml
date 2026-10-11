@@ -24,7 +24,7 @@ updates:
       android-build-tooling:
         patterns:
           - "com.android*"
-          - "org.jetbrains.kotlin*"
+          - "org.jetbrains.kotlin.*"
     schedule:
       interval: weekly
       day: friday
