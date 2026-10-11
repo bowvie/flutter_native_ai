@@ -1,3 +1,12 @@
+## 0.5.4
+
+- The Android plugin no longer pins its own Android Gradle Plugin and Kotlin
+    Gradle plugin versions and builds with the app's instead. A pinned AGP
+    newer than the app's failed the build with a `ClassCastException`. The
+    app needs Kotlin 2.2 or later and an AGP that supports `compileSdk 36`
+    (8.9.1 or later).
+- Updates the example app to AGP 9.4.1, Kotlin 2.4.21, and Gradle 9.6.0.
+
 ## 0.5.3
 
 - Moves the Pigeon host API to `@async`: the Kotlin bridge now implements
