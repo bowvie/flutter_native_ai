@@ -15,3 +15,13 @@ updates:
       day: friday
       time: "09:00"
       timezone: Europe/Amsterdam
+
+  - package-ecosystem: gradle
+    directories:
+      - /android
+      - /example/android
+    schedule:
+      interval: weekly
+      day: friday
+      time: "09:00"
+      timezone: Europe/Amsterdam
