@@ -20,6 +20,11 @@ updates:
     directories:
       - /android
       - /example/android
+    groups:
+      android-build-tooling:
+        patterns:
+          - "com.android*"
+          - "org.jetbrains.kotlin*"
     schedule:
       interval: weekly
       day: friday
