@@ -15,3 +15,18 @@ updates:
       day: friday
       time: "09:00"
       timezone: Europe/Amsterdam
+
+  - package-ecosystem: gradle
+    directories:
+      - /android
+      - /example/android
+    groups:
+      android-build-tooling:
+        patterns:
+          - "com.android*"
+          - "org.jetbrains.kotlin.*"
+    schedule:
+      interval: weekly
+      day: friday
+      time: "09:00"
+      timezone: Europe/Amsterdam
