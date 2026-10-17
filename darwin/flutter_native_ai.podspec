@@ -9,7 +9,7 @@ Pod::Spec.new do |s|
   s.description      = <<-DESC
 A Flutter plugin for on-device text generation with native platform AI models.
                        DESC
-  s.homepage         = 'https://github.com/bowvie/flutter_native_ai'
+  s.homepage         = 'https://github.com/polderbit/flutter_native_ai'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'BowVie' => 'info@bowvie.com' }
   s.source           = { :path => '.' }
